@@ -110,96 +110,13 @@ else:
 # CONTACT LOOKUP
 # ----------------------------------------------------------
 
-def find_contact_matches(emails):
-    if contacts.empty:
-        return pd.DataFrame()
-
-    results = []
-
-    email_col = next((c for c in contacts.columns if "email" in c), None)
-    domain_col = next((c for c in contacts.columns if "domain" in c), None)
-
-    if not email_col:
-        st.error("No email column found.")
-        return pd.DataFrame()
-
-    # Derive domain if needed
-    if not domain_col:
-        contacts["derived_domain"] = contacts[email_col].apply(
-            lambda x: x.split("@")[-1].lower() if isinstance(x, str) and "@" in x else ""
-        )
-        domain_col = "derived_domain"
-
-    for email in emails:
-        clean_email = email.strip().lower()
-        if not clean_email:
-            continue
-
-        # ----------------------------
-        # Exact Match (1 row)
-        # ----------------------------
-        exact = contacts[contacts[email_col].str.lower() == clean_email]
-        if not exact.empty:
-            row = exact.iloc[0].copy()
-            row["input"] = email
-            row["match type"] = "Exact Match"
-            row["match score"] = 100
-            results.append(row)
-            continue
-
-        # ----------------------------
-        # Domain Match (1 row)
-        # ----------------------------
-        domain = clean_email.split("@")[-1]
-        domain_match = contacts[contacts[domain_col].str.lower() == domain]
-
-        if not domain_match.empty:
-            row = domain_match.iloc[0].copy()
-
-            # Clear personal fields
-            personal_fields = [
-                "eloqua contacts first name",
-                "eloqua contacts last name",
-                "eloqua contacts job title",
-                "eloqua contacts buying role",
-                "eloqua contacts email address",
-                "eloqua contacts do not email",
-            ]
-            for col in personal_fields:
-                if col in row.index:
-                    row[col] = ""
-
-            row["input"] = email
-            row["match type"] = "Domain Match"
-            row["match score"] = 90
-            results.append(row)
-            continue
-
-        # ----------------------------
-        # No Match (still output a row!)
-        # ----------------------------
-        empty_row = {col: "" for col in contacts.columns}
-        empty_row["input"] = email
-        empty_row["match type"] = "No Match"
-        empty_row["match score"] = 0
-        results.append(pd.Series(empty_row))
-
-    return pd.DataFrame(results)
-
-# ----------------------------------------------------------
-# ACCOUNT MATCH
-# ----------------------------------------------------------
-# ----------------------------------------------------------
-# ACCOUNT LOOKUP
-# ----------------------------------------------------------
-
 def find_account_matches(inputs):
     """
     For every input account name:
       - Return EXACTLY ONE ROW
-      - Preserve input order
-      - Insert 'No Match' if nothing is found
-      - Use normalized name + abbreviation + fuzzy matching
+      - Preserve input order exactly
+      - Always include the 'input' column
+      - If no match: still return a row with blank fields
     """
 
     if contacts.empty:
@@ -207,20 +124,17 @@ def find_account_matches(inputs):
 
     results = []
 
-    # Required field
     acct_col = "oracle account customer name"
     if acct_col not in contacts.columns:
         st.error("Missing 'oracle account customer name' in dataset.")
         return pd.DataFrame()
 
-    # Pull normalized + abbreviation fields that we've precomputed
-    if "normalized_account" not in contacts.columns:
+    # Ensure normalized fields exist
+    if "normalized_account" not in contacts:
         contacts["normalized_account"] = contacts[acct_col].apply(normalize_name)
-
-    if "abbreviation" not in contacts.columns:
+    if "abbreviation" not in contacts:
         contacts["abbreviation"] = contacts[acct_col].apply(extract_abbreviation)
 
-    # All output columns (except match metadata)
     output_cols = [
         "oracle account customer id",
         "oracle account customer name",
@@ -233,28 +147,32 @@ def find_account_matches(inputs):
         "arr next renewal date"
     ]
 
-    # ------------------------------------------------------
-    # PROCESS EACH INPUT
-    # ------------------------------------------------------
+    # -----------------------------------------------------
+    # MAIN LOOP — one output row per input line
+    # -----------------------------------------------------
     for raw in inputs:
         user_input = raw.strip()
         clean = user_input.lower()
         norm_input = normalize_name(clean)
-
-        if not norm_input:
-            # blank input still gets a row
-            row = {"input": user_input, "match type": "No Match", "match score": 0}
-            for c in output_cols:
-                row[c] = ""
-            results.append(row)
-            continue
 
         best_row = None
         best_score = 0
         best_type = "No Match"
 
         # --------------------------------------------------
-        # SEARCH THROUGH CONTACTS
+        # EMPTY LINE → still produce a blank row
+        # --------------------------------------------------
+        if user_input == "":
+            out = {"input": ""}
+            out["match type"] = "No Match"
+            out["match score"] = 0
+            for c in output_cols:
+                out[c] = ""
+            results.append(out)
+            continue
+
+        # --------------------------------------------------
+        # ATTEMPT MATCHING
         # --------------------------------------------------
         for _, row in contacts.iterrows():
             acct_norm = row.get("normalized_account", "")
@@ -263,15 +181,10 @@ def find_account_matches(inputs):
             score = 0
             mtype = None
 
-            # Exact normalized match
             if norm_input == acct_norm:
                 score, mtype = 1.0, "Exact Match"
-
-            # Abbreviation match (ex: IBM → International Business Machines)
             elif abbrev and abbrev == norm_input:
                 score, mtype = 0.95, "Abbreviation Match"
-
-            # Fuzzy match (SequenceMatcher)
             else:
                 score = similarity(norm_input, acct_norm)
                 if score >= 0.90:
@@ -279,41 +192,35 @@ def find_account_matches(inputs):
                 elif score >= 0.85:
                     mtype = "Weak Fuzzy Match"
                 else:
-                    continue  # skip < 0.85
+                    continue
 
-            # Track the best result
+            # Update best
             if score > best_score:
                 best_score = score
                 best_row = row
                 best_type = mtype
 
-        # ------------------------------------------------------
+        # --------------------------------------------------
         # BUILD OUTPUT ROW
-        # ------------------------------------------------------
-        if best_row is not None and best_score >= 0.85:
+        # --------------------------------------------------
+        if best_row is None:
+            # NO MATCH — still return one row
+            out = {"input": user_input, "match type": "No Match", "match score": 0}
+            for c in output_cols:
+                out[c] = ""
+            results.append(out)
+
+        else:
             out = {
                 "input": user_input,
                 "match type": best_type,
-                "match score": round(best_score * 100, 1)
+                "match score": round(best_score * 100, 1),
             }
             for c in output_cols:
                 out[c] = best_row.get(c, "")
             results.append(out)
 
-        else:
-            # No Match → still output one row
-            out = {
-                "input": user_input,
-                "match type": "No Match",
-                "match score": 0
-            }
-            for c in output_cols:
-                out[c] = ""
-            results.append(out)
-
-    # -------------------------------------------------------
-    # RETURN RESULTS AS DATAFRAME (ORDER PRESERVED)
-    # -------------------------------------------------------
+    # Convert to DataFrame — order preserved
     return pd.DataFrame(results)
 
 

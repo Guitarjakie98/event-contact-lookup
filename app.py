@@ -106,15 +106,11 @@ if email_cols:
 else:
     domain_lookup = {}
 
-# ----------------------------------------------------------
-# CONTACT LOOKUP
-# ----------------------------------------------------------
-
-def find_account_matches(inputs):
+def find_contact_matches(emails):
     """
-    For every input account name:
+    For every input email:
       - Return EXACTLY ONE ROW
-      - Preserve input order exactly
+      - Preserve input order
       - Always include the 'input' column
       - If no match: still return a row with blank fields
     """
@@ -124,105 +120,91 @@ def find_account_matches(inputs):
 
     results = []
 
-    acct_col = "oracle account customer name"
-    if acct_col not in contacts.columns:
-        st.error("Missing 'oracle account customer name' in dataset.")
+    # Identify email + domain columns
+    email_cols = [c for c in contacts.columns if "email" in c]
+    domain_cols = [c for c in contacts.columns if "domain" in c]
+
+    if not email_cols:
+        st.error("No email column found in dataset.")
         return pd.DataFrame()
 
-    # Ensure normalized fields exist
-    if "normalized_account" not in contacts:
-        contacts["normalized_account"] = contacts[acct_col].apply(normalize_name)
-    if "abbreviation" not in contacts:
-        contacts["abbreviation"] = contacts[acct_col].apply(extract_abbreviation)
+    email_col = email_cols[0]
 
-    output_cols = [
-        "oracle account customer id",
-        "oracle account customer name",
-        "oracle account country",
-        "oracle account business unit",
-        "oracle account segmentation",
-        "is partner",
-        "oracle account line of business",
-        "arr total arr",
-        "arr next renewal date"
+    # Domain column or derive one
+    if domain_cols:
+        domain_col = domain_cols[0]
+    else:
+        contacts["derived_domain"] = contacts[email_col].apply(
+            lambda x: x.split("@")[-1].lower()
+            if isinstance(x, str) and "@" in x else ""
+        )
+        domain_col = "derived_domain"
+
+    # Personal fields to blank for domain matches
+    personal_fields = [
+        "eloqua contacts first name",
+        "eloqua contacts last name",
+        "eloqua contacts job title",
+        "eloqua contacts buying role",
+        "eloqua contacts email address",
+        "eloqua contacts do not email",
     ]
 
-    # -----------------------------------------------------
-    # MAIN LOOP — one output row per input line
-    # -----------------------------------------------------
-    for raw in inputs:
+    # Output columns (everything except match fields)
+    output_cols = [c for c in contacts.columns
+                   if c not in ["match type", "match score"]]
+
+    # ------------------------------------------------------
+    # PROCESS INPUT EMAILS IN ORDER
+    # ------------------------------------------------------
+    for raw in emails:
         user_input = raw.strip()
-        clean = user_input.lower()
-        norm_input = normalize_name(clean)
-
-        best_row = None
-        best_score = 0
-        best_type = "No Match"
-
-        # --------------------------------------------------
-        # EMPTY LINE → still produce a blank row
-        # --------------------------------------------------
         if user_input == "":
-            out = {"input": ""}
-            out["match type"] = "No Match"
-            out["match score"] = 0
+            # Blank input → still output one row
+            row = {"input": "", "match type": "No Match", "match score": 0}
             for c in output_cols:
-                out[c] = ""
+                row[c] = ""
+            results.append(row)
+            continue
+
+        email = user_input.lower()
+
+        # ----- Exact Match -----
+        exact = contacts[contacts[email_col].str.lower() == email].copy()
+        if not exact.empty:
+            row = exact.iloc[0].copy()
+
+            out = {"input": user_input, "match type": "Exact Match", "match score": 100}
+            for c in output_cols:
+                out[c] = row.get(c, "")
             results.append(out)
             continue
 
-        # --------------------------------------------------
-        # ATTEMPT MATCHING
-        # --------------------------------------------------
-        for _, row in contacts.iterrows():
-            acct_norm = row.get("normalized_account", "")
-            abbrev = row.get("abbreviation", "")
+        # ----- Domain Match -----
+        domain = email.split("@")[-1]
+        domain_match = contacts[contacts[domain_col].str.lower() == domain].copy()
 
-            score = 0
-            mtype = None
+        if not domain_match.empty:
+            row = domain_match.iloc[0].copy()
 
-            if norm_input == acct_norm:
-                score, mtype = 1.0, "Exact Match"
-            elif abbrev and abbrev == norm_input:
-                score, mtype = 0.95, "Abbreviation Match"
-            else:
-                score = similarity(norm_input, acct_norm)
-                if score >= 0.90:
-                    mtype = "Strong Fuzzy Match"
-                elif score >= 0.85:
-                    mtype = "Weak Fuzzy Match"
-                else:
-                    continue
+            # Blank personal fields
+            for col in personal_fields:
+                if col in row:
+                    row[col] = ""
 
-            # Update best
-            if score > best_score:
-                best_score = score
-                best_row = row
-                best_type = mtype
-
-        # --------------------------------------------------
-        # BUILD OUTPUT ROW
-        # --------------------------------------------------
-        if best_row is None:
-            # NO MATCH — still return one row
-            out = {"input": user_input, "match type": "No Match", "match score": 0}
+            out = {"input": user_input, "match type": "Domain Match", "match score": 90}
             for c in output_cols:
-                out[c] = ""
+                out[c] = row.get(c, "")
             results.append(out)
+            continue
 
-        else:
-            out = {
-                "input": user_input,
-                "match type": best_type,
-                "match score": round(best_score * 100, 1),
-            }
-            for c in output_cols:
-                out[c] = best_row.get(c, "")
-            results.append(out)
+        # ----- No Match -----
+        out = {"input": user_input, "match type": "No Match", "match score": 0}
+        for c in output_cols:
+            out[c] = ""
+        results.append(out)
 
-    # Convert to DataFrame — order preserved
     return pd.DataFrame(results)
-
 
 # ----------------------------------------------------------
 # UI STYLING

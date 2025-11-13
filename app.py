@@ -10,10 +10,10 @@ import streamlit as st     # last import
 st.set_page_config(
     page_title="Citrix Event Lookup Tool",
     layout="wide",
-    page_icon="📊",
+    page_icon="",
 )
 
-CITRIX_BLUE = "#009FD9"   # constants AFTER set_page_config are fine
+CITRIX_BLUE = "#009FD9"
 
 # ----------------------------------------------------------
 # Resource + Data Loader
@@ -38,54 +38,16 @@ def load_contacts() -> pd.DataFrame:
     contacts.columns = contacts.columns.str.lower().str.strip()
     return contacts.fillna("")
 
-
 contacts = load_contacts()
 
-# ============================================================
-# Precompute normalized fields and domain dictionary for speed
-# ============================================================
-
-# 1. Precompute normalized account names once
-if "oracle account customer name" in contacts.columns:
-    contacts["normalized_account"] = contacts["oracle account customer name"].apply(normalize_name)
-    contacts["abbreviation"] = contacts["oracle account customer name"].apply(extract_abbreviation)
-
-# 2. Precompute domain lookup dictionary for O(1) domain matches
-email_cols = [c for c in contacts.columns if "email" in c]
-domain_cols = [c for c in contacts.columns if "domain" in c]
-
-if email_cols:
-    email_col = email_cols[0]
-
-    # Add derived domain if missing
-    if domain_cols:
-        domain_col = domain_cols[0]
-    else:
-        contacts["derived_domain"] = contacts[email_col].apply(
-            lambda x: x.split("@")[-1].lower() if isinstance(x, str) and "@" in x else ""
-        )
-        domain_col = "derived_domain"
-
-    # Build fast domain → row lookup
-    domain_lookup = (
-        contacts
-        .sort_values(domain_col)
-        .drop_duplicates(domain_col)
-        .set_index(domain_col)
-        .to_dict("index")
-    )
-else:
-    domain_lookup = {}
-
 # ----------------------------------------------------------
-# Utility
+# Utility functions (MUST come before precompute)
 # ----------------------------------------------------------
 
 def similarity(a, b) -> float:
     if not isinstance(a, str) or not isinstance(b, str):
         return 0.0
     return SequenceMatcher(None, a.lower(), b.lower()).ratio()
-
 
 def normalize_name(name):
     """Clean company name and strip out legal suffixes."""
@@ -102,14 +64,47 @@ def normalize_name(name):
     name = re.sub(r"\s+", " ", name).strip()
     return name
 
-
 def extract_abbreviation(text: str) -> str:
-    """Extract abbreviation safely from parentheses, if present."""
+    """Extract abbreviation safely from parentheses."""
     if not isinstance(text, str):
         return ""
     matches = re.findall(r"\((.*?)\)", text)
     return matches[0].lower() if matches else ""
 
+# ----------------------------------------------------------
+# Precompute normalized fields and domain dictionary (Correct location)
+# ----------------------------------------------------------
+
+# 1. Precompute normalized account names once
+if "oracle account customer name" in contacts.columns:
+    contacts["normalized_account"] = contacts["oracle account customer name"].apply(normalize_name)
+    contacts["abbreviation"] = contacts["oracle account customer name"].apply(extract_abbreviation)
+
+# 2. Precompute domain dictionary once
+email_cols = [c for c in contacts.columns if "email" in c]
+
+if email_cols:
+    email_col = email_cols[0]
+
+    domain_cols = [c for c in contacts.columns if "domain" in c]
+    if domain_cols:
+        domain_col = domain_cols[0]
+    else:
+        contacts["derived_domain"] = contacts[email_col].apply(
+            lambda x: x.split("@")[-1].lower() if isinstance(x, str) and "@" in x else ""
+        )
+        domain_col = "derived_domain"
+
+    # Domain lookup dict (fast)
+    domain_lookup = (
+        contacts.sort_values(domain_col)
+                .groupby(domain_col)
+                .head(1)
+                .set_index(domain_col)
+                .to_dict("index")
+    )
+else:
+    domain_lookup = {}
 
 # ----------------------------------------------------------
 # CONTACT LOOKUP
@@ -121,7 +116,7 @@ def find_contact_matches(emails):
 
     results, missing_records = [], []
 
-    # Identify candidate columns
+    # Identify columns
     email_col_candidates = [c for c in contacts.columns if "email" in c]
     domain_col_candidates = [c for c in contacts.columns if "domain" in c]
 
@@ -129,10 +124,10 @@ def find_contact_matches(emails):
     domain_col = domain_col_candidates[0] if domain_col_candidates else None
 
     if not email_col:
-        st.error("No email column found in the dataset.")
+        st.error("No email column found in dataset.")
         return pd.DataFrame()
 
-    # If no domain col exists, derive it from email field
+    # Derive domain if needed
     if not domain_col:
         contacts["derived_domain"] = contacts[email_col].apply(
             lambda x: x.split("@")[-1].lower()
@@ -149,7 +144,7 @@ def find_contact_matches(emails):
         if not email:
             continue
 
-        # ----- Exact match -----
+        # ---- Exact match ----
         exact = contacts[contacts[email_col].str.lower() == email].copy()
         if not exact.empty:
             exact.insert(0, "match type", "Exact Match")
@@ -157,16 +152,15 @@ def find_contact_matches(emails):
             results.append(exact)
             continue
 
-        # ----- Domain match -----
+        # ---- Domain match ----
         domain = email.split("@")[-1]
         domain_match = contacts[contacts[domain_col].str.lower() == domain].copy()
 
         if not domain_match.empty:
-
-            # Keep only ONE ROW instead of hundreds
+            # Keep only ONE ROW
             single = domain_match.iloc[[0]].copy()
 
-            # Clear personal contact fields
+            # Clear personal data
             personal_fields = [
                 "eloqua contacts first name",
                 "eloqua contacts last name",
@@ -179,10 +173,8 @@ def find_contact_matches(emails):
                 if col in single.columns:
                     single[col] = ""
 
-            # Insert match metadata
             single.insert(0, "match type", "Domain Match")
             single.insert(1, "match score", 90)
-
             results.append(single)
 
         else:
@@ -192,16 +184,10 @@ def find_contact_matches(emails):
                 "input": email
             })
 
-    # ------------------------------------------------------
     # Combine all results
-    # ------------------------------------------------------
     combined = pd.concat(results, ignore_index=True) if results else pd.DataFrame()
-
     if missing_records:
-        combined = pd.concat(
-            [combined, pd.DataFrame(missing_records)],
-            ignore_index=True,
-        )
+        combined = pd.concat([combined, pd.DataFrame(missing_records)], ignore_index=True)
 
     return combined
 

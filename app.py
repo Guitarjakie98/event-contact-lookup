@@ -19,22 +19,18 @@ CITRIX_BLUE = "#009FD9"   # constants AFTER set_page_config are fine
 # Resource + Data Loader
 # ----------------------------------------------------------
 
-def resource_path(relative_path: str) -> str:
-    """
-    Get absolute path to resource, works for dev and for bundled use.
-    For this Streamlit app we just treat the app directory as the base.
-    """
-    base_path = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(base_path, relative_path)
-
+def resource_path(filename: str) -> str:
+    """Return absolute path to a resource bundled with the app."""
+    return os.path.join(os.path.dirname(__file__), filename)
 
 @st.cache_data(show_spinner=True)
 def load_contacts() -> pd.DataFrame:
     file_path = resource_path("event_data_for_app.parquet")
+
     if not os.path.exists(file_path):
         st.error(
             f"Could not find event_data_for_app.parquet at:\n{file_path}\n\n"
-            "Make sure the file sits in the same folder as app.py."
+            "Make sure the file is in the same folder as app.py."
         )
         return pd.DataFrame()
 

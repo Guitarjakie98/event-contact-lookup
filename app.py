@@ -53,7 +53,6 @@ def normalize_name(name):
     """Clean company name and strip out legal suffixes."""
     if not isinstance(name, str) or name.strip() == "":
         return ""
-
     name = name.lower()
     name = re.sub(r"[^a-z0-9\s()]", "", name)
     name = re.sub(
@@ -72,21 +71,19 @@ def extract_abbreviation(text: str) -> str:
     return matches[0].lower() if matches else ""
 
 # ----------------------------------------------------------
-# Precompute normalized fields and domain dictionary (Correct location)
+# Precompute normalized fields and domain dictionary
 # ----------------------------------------------------------
 
-# 1. Precompute normalized account names once
 if "oracle account customer name" in contacts.columns:
     contacts["normalized_account"] = contacts["oracle account customer name"].apply(normalize_name)
     contacts["abbreviation"] = contacts["oracle account customer name"].apply(extract_abbreviation)
 
-# 2. Precompute domain dictionary once
 email_cols = [c for c in contacts.columns if "email" in c]
 
 if email_cols:
     email_col = email_cols[0]
-
     domain_cols = [c for c in contacts.columns if "domain" in c]
+
     if domain_cols:
         domain_col = domain_cols[0]
     else:
@@ -95,7 +92,6 @@ if email_cols:
         )
         domain_col = "derived_domain"
 
-    # Domain lookup dict (fast)
     domain_lookup = (
         contacts.sort_values(domain_col)
                 .groupby(domain_col)
@@ -106,31 +102,19 @@ if email_cols:
 else:
     domain_lookup = {}
 
-def find_contact_matches(emails):
-    """
-    For every input email:
-      - Return EXACTLY ONE ROW
-      - Preserve input order
-      - Always include the 'input' column
-      - If no match: still return a row with blank fields
-    """
+# ----------------------------------------------------------
+# CONTACT MATCH FUNCTION
+# ----------------------------------------------------------
 
+def find_contact_matches(emails):
+    results = []
     if contacts.empty:
         return pd.DataFrame()
 
-    results = []
-
-    # Identify email + domain columns
     email_cols = [c for c in contacts.columns if "email" in c]
     domain_cols = [c for c in contacts.columns if "domain" in c]
-
-    if not email_cols:
-        st.error("No email column found in dataset.")
-        return pd.DataFrame()
-
     email_col = email_cols[0]
 
-    # Domain column or derive one
     if domain_cols:
         domain_col = domain_cols[0]
     else:
@@ -140,7 +124,6 @@ def find_contact_matches(emails):
         )
         domain_col = "derived_domain"
 
-    # Personal fields to blank for domain matches
     personal_fields = [
         "eloqua contacts first name",
         "eloqua contacts last name",
@@ -150,17 +133,11 @@ def find_contact_matches(emails):
         "eloqua contacts do not email",
     ]
 
-    # Output columns (everything except match fields)
-    output_cols = [c for c in contacts.columns
-                   if c not in ["match type", "match score"]]
+    output_cols = [c for c in contacts.columns if c not in ["match type", "match score"]]
 
-    # ------------------------------------------------------
-    # PROCESS INPUT EMAILS IN ORDER
-    # ------------------------------------------------------
     for raw in emails:
         user_input = raw.strip()
         if user_input == "":
-            # Blank input → still output one row
             row = {"input": "", "match type": "No Match", "match score": 0}
             for c in output_cols:
                 row[c] = ""
@@ -169,25 +146,22 @@ def find_contact_matches(emails):
 
         email = user_input.lower()
 
-        # ----- Exact Match -----
+        # Exact match
         exact = contacts[contacts[email_col].str.lower() == email].copy()
         if not exact.empty:
             row = exact.iloc[0].copy()
-
             out = {"input": user_input, "match type": "Exact Match", "match score": 100}
             for c in output_cols:
                 out[c] = row.get(c, "")
             results.append(out)
             continue
 
-        # ----- Domain Match -----
+        # Domain match
         domain = email.split("@")[-1]
         domain_match = contacts[contacts[domain_col].str.lower() == domain].copy()
 
         if not domain_match.empty:
             row = domain_match.iloc[0].copy()
-
-            # Blank personal fields
             for col in personal_fields:
                 if col in row:
                     row[col] = ""
@@ -198,7 +172,68 @@ def find_contact_matches(emails):
             results.append(out)
             continue
 
-        # ----- No Match -----
+        # No match
+        out = {"input": user_input, "match type": "No Match", "match score": 0}
+        for c in output_cols:
+            out[c] = ""
+        results.append(out)
+
+    return pd.DataFrame(results)
+
+# ----------------------------------------------------------
+# ACCOUNT MATCH FUNCTION — COMPLETE VERSION
+# ----------------------------------------------------------
+
+def find_account_matches(inputs):
+    results = []
+    output_cols = [c for c in contacts.columns if c not in ["match type", "match score"]]
+
+    for raw in inputs:
+        user_input = raw.strip()
+        if user_input == "":
+            row = {"input": "", "match type": "No Match", "match score": 0}
+            for c in output_cols:
+                row[c] = ""
+            results.append(row)
+            continue
+
+        clean_input = normalize_name(user_input)
+        abbrev_input = extract_abbreviation(user_input)
+
+        # Exact normalized match
+        exact = contacts[contacts["normalized_account"] == clean_input]
+        if not exact.empty:
+            row = exact.iloc[0].copy()
+            out = {"input": user_input, "match type": "Exact Name Match", "match score": 100}
+            for c in output_cols:
+                out[c] = row.get(c, "")
+            results.append(out)
+            continue
+
+        # Abbreviation match (e.g., AMD, IBM)
+        if abbrev_input:
+            ab = contacts[contacts["abbreviation"] == abbrev_input]
+            if not ab.empty:
+                row = ab.iloc[0].copy()
+                out = {"input": user_input, "match type": "Abbrev Match", "match score": 95}
+                for c in output_cols:
+                    out[c] = row.get(c, "")
+                results.append(out)
+                continue
+
+        # Fuzzy match
+        contacts["fuzzy"] = contacts["normalized_account"].apply(lambda x: similarity(clean_input, x))
+        best = contacts.sort_values("fuzzy", ascending=False).iloc[0]
+
+        if best["fuzzy"] >= 0.73:  # Threshold tuned for speed + correctness
+            row = best.copy()
+            out = {"input": user_input, "match type": "Fuzzy Match", "match score": round(best["fuzzy"] * 100)}
+            for c in output_cols:
+                out[c] = row.get(c, "")
+            results.append(out)
+            continue
+
+        # No match
         out = {"input": user_input, "match type": "No Match", "match score": 0}
         for c in output_cols:
             out[c] = ""
@@ -210,7 +245,6 @@ def find_contact_matches(emails):
 # UI STYLING
 # ----------------------------------------------------------
 
-# Custom CSS
 st.markdown(
     f"""
     <style>
@@ -259,7 +293,7 @@ st.markdown(
 )
 
 # ----------------------------------------------------------
-# MAIN LAYOUT
+# MAIN UI
 # ----------------------------------------------------------
 
 st.markdown('<div class="citrix-title">Citrix Event Lookup Tool</div>', unsafe_allow_html=True)
@@ -271,7 +305,6 @@ st.markdown(
 )
 st.markdown("---")
 
-# Dataset status
 if not contacts.empty:
     st.success(
         f"Loaded **{len(contacts):,}** rows • **{len(contacts.columns)}** columns "
@@ -287,7 +320,6 @@ tab1, tab2 = st.tabs(["Contact Lookup", "Account Match"])
 # -------------------------
 with tab1:
     st.subheader("Paste attendee emails (one per line):")
-
     col_left, col_right = st.columns([2, 1])
 
     with col_left:
@@ -301,9 +333,10 @@ with tab1:
         st.markdown(
             """
             **How it works**  
-            • Exact match on email address  
-            • Fallback to domain-only match  
-            • Personal fields are blanked on domain matches  
+            • Exact match  
+            • Domain fallback  
+            • Personal fields blanked  
+            • Always one output row  
             """
         )
 
@@ -318,7 +351,7 @@ with tab1:
                 df = find_contact_matches(items)
 
             if df.empty:
-                st.warning("No matches found (≥ 0% threshold).")
+                st.warning("No matches found.")
             else:
                 st.success(f"Found **{len(df):,}** rows.")
                 st.dataframe(df, use_container_width=True)
@@ -350,9 +383,11 @@ with tab2:
         st.markdown(
             """
             **Matching logic**  
-            • Normalizes names (removes Inc, LLC, etc.)  
-            • Uses abbreviations in parentheses (e.g., *Advanced Micro Devices (AMD)*)  
-            • Fuzzy string similarity with thresholds  
+            • Exact normalized match  
+            • Abbreviation match  
+            • Fuzzy similarity  
+            • Order preserved  
+            • Blank rows preserved  
             """
         )
 
@@ -367,7 +402,7 @@ with tab2:
                 df = find_account_matches(items)
 
             if df.empty:
-                st.warning("No account matches found above the threshold.")
+                st.warning("No account matches found.")
             else:
                 st.success(f"Found **{len(df):,}** account matches.")
                 st.dataframe(df, use_container_width=True)

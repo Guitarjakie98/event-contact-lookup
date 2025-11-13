@@ -41,6 +41,42 @@ def load_contacts() -> pd.DataFrame:
 
 contacts = load_contacts()
 
+# ============================================================
+# Precompute normalized fields and domain dictionary for speed
+# ============================================================
+
+# 1. Precompute normalized account names once
+if "oracle account customer name" in contacts.columns:
+    contacts["normalized_account"] = contacts["oracle account customer name"].apply(normalize_name)
+    contacts["abbreviation"] = contacts["oracle account customer name"].apply(extract_abbreviation)
+
+# 2. Precompute domain lookup dictionary for O(1) domain matches
+email_cols = [c for c in contacts.columns if "email" in c]
+domain_cols = [c for c in contacts.columns if "domain" in c]
+
+if email_cols:
+    email_col = email_cols[0]
+
+    # Add derived domain if missing
+    if domain_cols:
+        domain_col = domain_cols[0]
+    else:
+        contacts["derived_domain"] = contacts[email_col].apply(
+            lambda x: x.split("@")[-1].lower() if isinstance(x, str) and "@" in x else ""
+        )
+        domain_col = "derived_domain"
+
+    # Build fast domain → row lookup
+    domain_lookup = (
+        contacts
+        .sort_values(domain_col)
+        .drop_duplicates(domain_col)
+        .set_index(domain_col)
+        .to_dict("index")
+    )
+else:
+    domain_lookup = {}
+
 # ----------------------------------------------------------
 # Utility
 # ----------------------------------------------------------

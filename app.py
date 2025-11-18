@@ -215,7 +215,9 @@ def find_account_matches(inputs):
         "oracle account customer name",
         "oracle account country",
         "oracle account business unit",
-        "oracle account segmentation",
+        "oracle account account segmentation",
+        "ats team person name".
+        "ae person name",
         "is partner",
         "oracle account line of business",
         "arr total arr",

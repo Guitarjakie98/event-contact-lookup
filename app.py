@@ -53,7 +53,7 @@ contacts = load_contacts()
 
 @st.cache_resource(show_spinner=True)
 def load_embedding_model():
-    return SentenceTransformer("all-MiniLM-L6-v2")
+    return SentenceTransformer("multi-qa-MiniLM-L6-cos-v1")
 
 
 @st.cache_resource(show_spinner=True)

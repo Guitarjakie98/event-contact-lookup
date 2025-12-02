@@ -1,5 +1,6 @@
 import sys
 import os
+import numpy as np
 import re
 from difflib import SequenceMatcher
 from rapidfuzz import fuzz, process
@@ -255,42 +256,40 @@ def find_account_matches(inputs):
             results.append(out)
             continue
 
-        # New input embedding
+        # --- 1. Semantic similarity ---
         emb_input = model.encode(norm_input, convert_to_tensor=True)
+        sem_scores = util.cos_sim(emb_input, embeddings_all)[0].cpu().numpy()  # numpy array (0–1)
 
-        # 1. Semantic similarity
-        sem_scores = util.cos_sim(emb_input, embeddings_all)[0]
-
-        # 2. Fuzzy score for each candidate
-        fuzzy_scores = [
+        # --- 2. Fuzzy similarity ---
+        fuzzy_scores = np.array([
             fuzz.ratio(norm_input, cand) / 100
             for cand in norm_names
-        ]
+        ])  # numpy array (0–1)
 
-        # 3. Token overlap (Jaccard)
+        # --- 3. Token overlap (Jaccard) ---
         input_tokens = set(norm_input.split())
-        jaccard_scores = [
+        jaccard_scores = np.array([
             len(input_tokens.intersection(set(c.split()))) /
             len(input_tokens.union(set(c.split()))) if c.split() else 0
             for c in norm_names
-        ]
+        ])  # numpy array (0–1)
 
-        # Weighted hybrid
+        # --- 4. Weighted hybrid score ---
         hybrid_scores = (
-            0.65 * sem_scores.cpu().numpy() +
+            0.65 * sem_scores +
             0.25 * fuzzy_scores +
             0.10 * jaccard_scores
         )
 
         # Best match index
-        best_idx = int(hybrid_scores.argmax())
+        best_idx = int(np.argmax(hybrid_scores))
         best_score = float(hybrid_scores[best_idx])
         row = contacts.iloc[best_idx]
 
-        # Score → User-friendly percent
+        # Score → nicer %
         final_score_percent = round(best_score * 100, 1)
 
-        # Classification
+        # --- 5. Match category ---
         if best_score >= 0.70:
             match_type = "High Confidence Match"
         elif best_score >= 0.55:

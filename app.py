@@ -4,6 +4,9 @@ import re
 from difflib import SequenceMatcher
 from rapidfuzz import fuzz, process
 
+from sentence_transformers import SentenceTransformer, util
+import torch
+
 import pandas as pd
 import streamlit as st     # last import
 

@@ -240,6 +240,7 @@ def find_account_matches(inputs):
         "arr next renewal date"
     ]
 
+    # Preload model + embeddings
     model = load_embedding_model()
     embeddings_all = account_embeddings
     norm_names = contacts["normalized_account"].tolist()
@@ -250,24 +251,49 @@ def find_account_matches(inputs):
 
         if not norm_input:
             out = {"input": user_input, "match type": "No Match", "match score": 0}
-            for c in output_cols:
-                out[c] = ""
+            for c in output_cols: out[c] = ""
             results.append(out)
             continue
 
+        # New input embedding
         emb_input = model.encode(norm_input, convert_to_tensor=True)
 
-        scores = util.cos_sim(emb_input, embeddings_all)[0]
+        # 1. Semantic similarity
+        sem_scores = util.cos_sim(emb_input, embeddings_all)[0]
 
-        best_idx = int(torch.argmax(scores))
-        best_score = float(scores[best_idx])
+        # 2. Fuzzy score for each candidate
+        fuzzy_scores = [
+            fuzz.ratio(norm_input, cand) / 100
+            for cand in norm_names
+        ]
+
+        # 3. Token overlap (Jaccard)
+        input_tokens = set(norm_input.split())
+        jaccard_scores = [
+            len(input_tokens.intersection(set(c.split()))) /
+            len(input_tokens.union(set(c.split()))) if c.split() else 0
+            for c in norm_names
+        ]
+
+        # Weighted hybrid
+        hybrid_scores = (
+            0.65 * sem_scores.cpu().numpy() +
+            0.25 * fuzzy_scores +
+            0.10 * jaccard_scores
+        )
+
+        # Best match index
+        best_idx = int(hybrid_scores.argmax())
+        best_score = float(hybrid_scores[best_idx])
         row = contacts.iloc[best_idx]
 
-        match_score = round(best_score * 100, 1)
+        # Score → User-friendly percent
+        final_score_percent = round(best_score * 100, 1)
 
+        # Classification
         if best_score >= 0.70:
-            match_type = "Embedding Match"
-        elif best_score >= 0.50:
+            match_type = "High Confidence Match"
+        elif best_score >= 0.55:
             match_type = "Low Confidence Match"
         else:
             match_type = "No Match"
@@ -275,7 +301,7 @@ def find_account_matches(inputs):
         out = {
             "input": user_input,
             "match type": match_type,
-            "match score": match_score,
+            "match score": final_score_percent,
         }
 
         for c in output_cols:

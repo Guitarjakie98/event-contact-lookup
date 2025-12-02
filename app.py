@@ -3,7 +3,8 @@ import os
 import re
 from difflib import SequenceMatcher
 from rapidfuzz import fuzz, process
-
+from sentence_transformers import SentenceTransformer, util
+import torch
 import pandas as pd
 import streamlit as st     # last import
 
@@ -44,6 +45,24 @@ def load_contacts() -> pd.DataFrame:
 
 contacts = load_contacts()
 
+
+
+# ----------------------------------------------------------
+# Embedding Model Loader (cached)
+# ----------------------------------------------------------
+
+@st.cache_resource(show_spinner=True)
+def load_embedding_model():
+    return SentenceTransformer("all-MiniLM-L6-v2")
+
+
+@st.cache_resource(show_spinner=True)
+def compute_account_embeddings(names_list):
+    """
+    Precompute embeddings for all normalized account names.
+    """
+    model = load_embedding_model()
+    return model.encode(names_list, convert_to_tensor=True, show_progress_bar=False)
 
 # ----------------------------------------------------------
 # Utility functions (DEFINED EARLY — REQUIRED)
@@ -109,6 +128,12 @@ if email_cols:
     )
 else:
     domain_lookup = {}
+
+# ----------------------------------------------------------
+# Precompute embeddings for all normalized accounts
+# ----------------------------------------------------------
+account_names = contacts["normalized_account"].fillna("").tolist()
+account_embeddings = compute_account_embeddings(account_names)
 
 
 # ----------------------------------------------------------
@@ -194,21 +219,12 @@ def find_contact_matches(emails):
 # ----------------------------------------------------------
 # ACCOUNT MATCH FUNCTION — RAPIDFUZZ VERSION
 # ----------------------------------------------------------
-
 def find_account_matches(inputs):
     if contacts.empty:
         return pd.DataFrame()
 
     results = []
     acct_col = "oracle account customer name"
-
-    # Ensure normalized + abbreviation fields exist
-    contacts["normalized_account"] = contacts[acct_col].apply(normalize_name)
-    contacts["abbreviation"] = contacts[acct_col].apply(extract_abbreviation)
-
-    # Safe lists for RapidFuzz
-    lookup_names = contacts["normalized_account"].fillna("").tolist()
-    lookup_abbr  = contacts["abbreviation"].fillna("").tolist()
 
     output_cols = [
         "oracle account customer id",
@@ -224,58 +240,47 @@ def find_account_matches(inputs):
         "arr next renewal date"
     ]
 
-    # ------------------------------------------------------
-    # PROCESS EACH INPUT
-    # ------------------------------------------------------
+    model = load_embedding_model()
+    embeddings_all = account_embeddings
+    norm_names = contacts["normalized_account"].tolist()
+
     for raw in inputs:
         user_input = raw.strip()
-        clean = user_input.lower()
-        norm_input = normalize_name(clean)
+        norm_input = normalize_name(user_input)
 
         if not norm_input:
             out = {"input": user_input, "match type": "No Match", "match score": 0}
-            for c in output_cols: out[c] = ""
+            for c in output_cols:
+                out[c] = ""
             results.append(out)
             continue
 
-        # 1. Abbreviation match
-        if norm_input in lookup_abbr:
-            idx = lookup_abbr.index(norm_input)
-            row = contacts.iloc[idx]
-            out = {"input": user_input, "match type": "Abbreviation Match", "match score": 95}
-            for c in output_cols: out[c] = row.get(c, "")
-            results.append(out)
-            continue
+        emb_input = model.encode(norm_input, convert_to_tensor=True)
 
-        # 2. Exact normalized match
-        if norm_input in lookup_names:
-            idx = lookup_names.index(norm_input)
-            row = contacts.iloc[idx]
-            out = {"input": user_input, "match type": "Exact Match", "match score": 100}
-            for c in output_cols: out[c] = row.get(c, "")
-            results.append(out)
-            continue
+        scores = util.cos_sim(emb_input, embeddings_all)[0]
 
-        # 3. RapidFuzz fuzzy match
-        match = process.extractOne(norm_input, lookup_names, scorer=fuzz.ratio)
+        best_idx = int(torch.argmax(scores))
+        best_score = float(scores[best_idx])
+        row = contacts.iloc[best_idx]
 
-        if match:
-            best_name, best_score, idx = match
+        match_score = round(best_score * 100, 1)
 
-            if best_score >= 85:
-                row = contacts.iloc[idx]
-                out = {
-                    "input": user_input,
-                    "match type": "Fuzzy Match",
-                    "match score": round(best_score, 1),
-                }
-                for c in output_cols: out[c] = row.get(c, "")
-                results.append(out)
-                continue
+        if best_score >= 0.70:
+            match_type = "Embedding Match"
+        elif best_score >= 0.50:
+            match_type = "Low Confidence Match"
+        else:
+            match_type = "No Match"
 
-        # 4. No match
-        out = {"input": user_input, "match type": "No Match", "match score": 0}
-        for c in output_cols: out[c] = ""
+        out = {
+            "input": user_input,
+            "match type": match_type,
+            "match score": match_score,
+        }
+
+        for c in output_cols:
+            out[c] = row.get(c, "") if match_type != "No Match" else ""
+
         results.append(out)
 
     return pd.DataFrame(results)
@@ -424,7 +429,7 @@ with tab2:
             **Matching logic**  
             • Normalized exact match  
             • Abbreviation match  
-            • RapidFuzz fuzzy match  
+            • Embedding semnatic match  
             • One row per input  
             • Input order preserved  
             """

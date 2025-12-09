@@ -68,9 +68,6 @@ def load_embeddings():
 with st.spinner("Loading embeddings…"):
     account_embeddings = load_embeddings()
 
-# Load array now
-account_embeddings = load_embeddings()
-
 def normalize_name(name):
     """Clean company name and strip out legal suffixes."""
     if not isinstance(name, str) or name.strip() == "":

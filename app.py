@@ -8,6 +8,7 @@ from sentence_transformers import SentenceTransformer, util
 import torch
 import pandas as pd
 import streamlit as st     # last import
+import requests
 
 # MUST be the first Streamlit command
 st.set_page_config(
@@ -49,28 +50,38 @@ contacts = load_contacts()
 # ----------------------------------------------------------
 # Load precomputed embeddings (fast startup)
 # ----------------------------------------------------------
-
 def load_embeddings():
-    possible_paths = [
-        "account_embeddings.npy",  # local folder next to app.py
-        os.path.abspath("account_embeddings.npy"),  # absolute version
-        os.path.expanduser("~/EventContactLookupWeb/account_embeddings.npy"),
-        os.path.expanduser("/Users/jacobmarchand/EventContactLookupWeb/account_embeddings.npy"),
-        os.path.expanduser("~/Google Drive/Embeddings/account_embeddings.npy"),
-        os.path.expanduser("~/GoogleDrive/Embeddings/account_embeddings.npy"),
-        os.path.expanduser("~/Library/CloudStorage/GoogleDrive-jacob.j.marchand@gmail.com/My Drive/Embeddings/account_embeddings.npy"),
-    ]
+    """
+    Downloads account_embeddings.npy from Google Drive if not present locally,
+    then loads it into memory.
+    """
 
-    st.write("🔎 Checking these locations for embeddings:\n")
-    for path in possible_paths:
-        exists = os.path.exists(path)
-        st.write(f"{path} → exists: {exists}")
-        if exists:
-            st.write(f"📦 Loaded embeddings from: {path}")
-            return np.load(path)
+    LOCAL_FILE = "account_embeddings.npy"
+    FILE_ID = "1cRJD31D2BSnzYRJbDs56SJdlXBr2sWeF"
+    DOWNLOAD_URL = f"https://drive.google.com/uc?export=download&id={FILE_ID}"
 
-    st.error("❌ Could not find account_embeddings.npy in any known location.")
-    st.stop()
+    # 1. If file already exists locally → load it
+    if os.path.exists(LOCAL_FILE):
+        st.write("📦 Using locally cached embeddings.")
+        return np.load(LOCAL_FILE)
+
+    # 2. Otherwise → download from Google Drive
+    st.write("🌐 Downloading embeddings from Google Drive... (~515MB, one-time)")
+
+    try:
+        response = requests.get(DOWNLOAD_URL, stream=True)
+        response.raise_for_status()
+
+        with open(LOCAL_FILE, "wb") as f:
+            for chunk in response.iter_content(chunk_size=1024 * 1024):  # 1MB chunks
+                f.write(chunk)
+
+        st.success("✅ Download complete! Loaded embeddings from Google Drive.")
+        return np.load(LOCAL_FILE)
+
+    except Exception as e:
+        st.error(f"❌ Failed to download embeddings: {e}")
+        st.stop()
 
 # Load array now
 account_embeddings = load_embeddings()

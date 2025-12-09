@@ -232,19 +232,19 @@ def find_account_matches(inputs):
 
     results = []
 
-    output_cols = {
-    "customer_id": "customer_id",
-    "oracle account customer name": "customer_name",
-    "oracle account account segmentation": "account_segmentation",
-    "oracle account country": "country",
-    "oracle account line of business": "line_of_business",
-    "ae person name": "ae_name",
-    "ats team person name": "ats_name",
-    "is partner": "ispartner",
-    "arr total arr": "arr",
-    "oracle account engagement score": "account_engagement_score",
-    "oracle account next renewal date": "next_renewal_date",
-}
+    output_cols = [
+    "customer_name",
+    "customer_id",
+    "account_segmentation",
+    "country",
+    "line_of_business",
+    "level14_territory_name",
+    "email_address",
+    "first_name",
+    "last_name",
+    "job_title",
+    "sales_buying_role_code",
+]
 
     # Pre-load model + embeddings
     model = load_embedding_model()

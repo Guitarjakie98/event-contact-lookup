@@ -52,8 +52,12 @@ contacts = load_contacts()
 
 def load_embeddings():
     possible_paths = [
-        "account_embeddings.npy",  # Local folder
-        os.path.expanduser("~/Library/CloudStorage/GoogleDrive/Embeddings/account_embeddings.npy"),
+        "account_embeddings.npy",  # Local folder (fallback)
+
+        # Google Drive Desktop sync folder (your exact path)
+        os.path.expanduser(
+            "~/Library/CloudStorage/GoogleDrive-jacob.j.marchand@gmail.com/My Drive/Embeddings/account_embeddings.npy"
+        ),
     ]
 
     for path in possible_paths:

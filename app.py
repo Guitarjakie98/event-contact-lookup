@@ -343,13 +343,13 @@ def find_account_matches(inputs):
         row = contacts.iloc[best_account_index]
         final_score_percent = round(best_score * 100, 1)
     
-                  # --- Match categories ---
-                if best_score >= 0.70:
-                    match_type = "High Confidence Match"
-                elif best_score >= 0.55:
-                    match_type = "Low Confidence Match"
-                else:
-                    match_type = "No Match"
+        # --- Match categories ---
+        if best_score >= 0.70:
+            match_type = "High Confidence Match"
+        elif best_score >= 0.55:
+            match_type = "Low Confidence Match"
+        else:
+            match_type = "No Match"
 
         out = {
             "input": user_input,

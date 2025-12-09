@@ -139,7 +139,7 @@ def find_contact_matches(emails):
 
     output_cols = [
         c for c in contacts.columns
-        if c not in ["match type", "match score", "party_number"]
+        if c not in ["match type", "match score", "party_number", "normalized_account", "abbreviation" ]
     ]
 
     # ------------------------------------------------------

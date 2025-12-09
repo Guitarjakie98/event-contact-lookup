@@ -59,7 +59,7 @@ EMBEDDINGS_URL = "https://storage.googleapis.com/citrix-event-lookup/account_emb
 
 @st.cache_resource(show_spinner=True)
 def load_embeddings():
-    st.write("📥 Loading embeddings from Google Cloud Storage...")
+    st.write("Loading embeddings")
     r = requests.get(EMBEDDINGS_URL)
     r.raise_for_status()   # Fail loudly if URL is ever incorrect
     return np.load(io.BytesIO(r.content))

@@ -46,7 +46,26 @@ def load_contacts() -> pd.DataFrame:
 
 contacts = load_contacts()
 
+# ----------------------------------------------------------
+# Load precomputed embeddings (fast startup)
+# ----------------------------------------------------------
 
+def load_embeddings():
+    possible_paths = [
+        "account_embeddings.npy",  # Local folder
+        os.path.expanduser("~/Library/CloudStorage/GoogleDrive/Embeddings/account_embeddings.npy"),
+    ]
+
+    for path in possible_paths:
+        if os.path.exists(path):
+            st.write(f"📦 Loaded embeddings from: {path}")
+            return np.load(path)
+
+    st.error("❌ Could not find account_embeddings.npy in any known location.")
+    st.stop()
+
+# Load array now
+account_embeddings = load_embeddings()
 
 def normalize_name(name):
     """Clean company name and strip out legal suffixes."""
@@ -84,26 +103,6 @@ else:
 # ----------------------------------------------------------
 # Embedding Model Loader (cached)
 # ----------------------------------------------------------
-
-@st.cache_resource(show_spinner=True)
-def load_embedding_model():
-    return SentenceTransformer("multi-qa-MiniLM-L6-cos-v1")
-
-
-@st.cache_resource(show_spinner=True)
-def compute_account_embeddings(names_list):
-    """
-    Precompute embeddings for all normalized account names.
-    """
-    model = load_embedding_model()
-    return model.encode(names_list, convert_to_tensor=True, show_progress_bar=False)
-
-# ----------------------------------------------------------
-# Precompute embeddings for all normalized accounts
-# ----------------------------------------------------------
-account_names = contacts["normalized_account"].fillna("").tolist()
-account_embeddings = compute_account_embeddings(account_names)
-
 
 def find_contact_matches(emails):
     results = []

@@ -182,20 +182,42 @@ def find_contact_matches(emails):
                 if col in row:
                     row[col] = ""
 
-            out = {"input": user_input, "match type": "Domain Match", "match score": 90}
-            for c in output_cols:
-                out[c] = row.get(c, "")
-            results.append(out)
-            continue
-
-        # No match
-        out = {"input": user_input, "match type": "No Match", "match score": 0}
-        for c in output_cols:
-            out[c] = ""
-        results.append(out)
-
-    return pd.DataFrame(results)
-
+            
+            # ---------------------------------------------------------
+            # NOW end the function PROPERLY — remove earlier return!!!
+            # --------------------------------------------
+            
+            # ----------------------------------------------------------
+            # END OF FUNCTION — Format output dataframe
+            # ----------------------------------------------------------
+            
+            df = pd.DataFrame(results)
+            
+            desired_order = [
+                "input",
+                "match type",
+                "match score",
+                "customer_name",
+                "customer_id",
+                "account_segmentation",
+                "country",
+                "line_of_business",
+                "level14_territory_name",
+                "email_address",
+                "first_name",
+                "last_name",
+                "job_title",
+                "sales_buying_role_code",
+            ]
+            
+            # Keep only columns that exist
+            desired_order = [c for c in desired_order if c in df.columns]
+            
+            # Put missing columns at the end
+            df = df.reindex(columns = desired_order + [c for c in df.columns if c not in desired_order])
+            
+            return df
+     
 # ----------------------------------------------------------
 # ACCOUNT MATCH FUNCTION — RAPIDFUZZ VERSION
 # ----------------------------------------------------------

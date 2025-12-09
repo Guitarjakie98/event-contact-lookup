@@ -67,8 +67,6 @@ def load_embeddings():
 # Load once at startup
 with st.spinner("Loading embeddings…"):
     account_embeddings = load_embeddings()
-# Load it once at startup
-account_embeddings = load_embeddings()
 
 # Load array now
 account_embeddings = load_embeddings()

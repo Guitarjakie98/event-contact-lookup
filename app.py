@@ -50,38 +50,22 @@ contacts = load_contacts()
 # ----------------------------------------------------------
 # Load precomputed embeddings (fast startup)
 # ----------------------------------------------------------
+import numpy as np
+import requests
+import io
+import streamlit as st
+
+EMBEDDINGS_URL = "https://storage.googleapis.com/citrix-event-lookup/account_embeddings.npy"
+
+@st.cache_resource(show_spinner=True)
 def load_embeddings():
-    """
-    Downloads account_embeddings.npy from Google Drive if not present locally,
-    then loads it into memory.
-    """
+    st.write("📥 Loading embeddings from Google Cloud Storage...")
+    r = requests.get(EMBEDDINGS_URL)
+    r.raise_for_status()   # Fail loudly if URL is ever incorrect
+    return np.load(io.BytesIO(r.content))
 
-    LOCAL_FILE = "account_embeddings.npy"
-    FILE_ID = "1cRJD31D2BSnzYRJbDs56SJdlXBr2sWeF"
-    DOWNLOAD_URL = f"https://drive.google.com/uc?export=download&id={FILE_ID}"
-
-    # 1. If file already exists locally → load it
-    if os.path.exists(LOCAL_FILE):
-        st.write("📦 Using locally cached embeddings.")
-        return np.load(LOCAL_FILE)
-
-    # 2. Otherwise → download from Google Drive
-    st.write("🌐 Downloading embeddings from Google Drive... (~515MB, one-time)")
-
-    try:
-        response = requests.get(DOWNLOAD_URL, stream=True)
-        response.raise_for_status()
-
-        with open(LOCAL_FILE, "wb") as f:
-            for chunk in response.iter_content(chunk_size=1024 * 1024):  # 1MB chunks
-                f.write(chunk)
-
-        st.success("✅ Download complete! Loaded embeddings from Google Drive.")
-        return np.load(LOCAL_FILE)
-
-    except Exception as e:
-        st.error(f"❌ Failed to download embeddings: {e}")
-        st.stop()
+# Load it once at startup
+account_embeddings = load_embeddings()
 
 # Load array now
 account_embeddings = load_embeddings()

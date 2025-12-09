@@ -113,7 +113,6 @@ def find_contact_matches(emails):
     # Identify the email column explicitly
     email_cols = [c for c in contacts.columns if c == "email_address"]
     if not email_cols:
-        # without email column, we cannot match → return all No Match
         return pd.DataFrame([{
             "input": e, "match type": "No Match", "match score": 0
         } for e in emails])
@@ -129,7 +128,6 @@ def find_contact_matches(emails):
         )
         domain_col = "email_domain"
 
-    # Updated personal fields using YOUR new dataset
     personal_fields = [
         "first_name",
         "last_name",
@@ -139,11 +137,10 @@ def find_contact_matches(emails):
         "do_not_email_flag",
     ]
 
-    # Output columns are all columns except special ones
     output_cols = [
-    c for c in contacts.columns
-    if c not in ["match type", "match score", "party_number"]
-]
+        c for c in contacts.columns
+        if c not in ["match type", "match score", "party_number"]
+    ]
 
     # ------------------------------------------------------
     # PROCESS INPUT EMAILS IN ORDER
@@ -151,6 +148,7 @@ def find_contact_matches(emails):
     for raw in emails:
         user_input = raw.strip()
 
+        # Empty input
         if user_input == "":
             row = {"input": "", "match type": "No Match", "match score": 0}
             for c in output_cols:
@@ -170,53 +168,58 @@ def find_contact_matches(emails):
             results.append(out)
             continue
 
-        # Domain match (e.g. @ibm.com → IBM accounts)
+        # Domain match
         domain = email.split("@")[-1]
         domain_match = contacts[contacts[domain_col].str.lower() == domain]
 
         if not domain_match.empty:
             row = domain_match.iloc[0].copy()
 
-            # Blank personal fields so we don't leak wrong contact data
+            # Blank personal fields so we don’t leak wrong contact data
             for col in personal_fields:
                 if col in row:
                     row[col] = ""
 
-            
-            # ---------------------------------------------------------
-            # NOW end the function PROPERLY — remove earlier return!!!
-            # --------------------------------------------
-            
-            # ----------------------------------------------------------
-            # END OF FUNCTION — Format output dataframe
-            # ----------------------------------------------------------
-            
-            df = pd.DataFrame(results)
-            
-            desired_order = [
-                "input",
-                "match type",
-                "match score",
-                "customer_name",
-                "customer_id",
-                "account_segmentation",
-                "country",
-                "line_of_business",
-                "level14_territory_name",
-                "email_address",
-                "first_name",
-                "last_name",
-                "job_title",
-                "sales_buying_role_code",
-            ]
-            
-            # Keep only columns that exist
-            desired_order = [c for c in desired_order if c in df.columns]
-            
-            # Put missing columns at the end
-            df = df.reindex(columns = desired_order + [c for c in df.columns if c not in desired_order])
-            
-            return df
+            out = {"input": user_input, "match type": "Domain Match", "match score": 90}
+            for c in output_cols:
+                out[c] = row.get(c, "")
+            results.append(out)
+            continue
+
+        # No match
+        out = {"input": user_input, "match type": "No Match", "match score": 0}
+        for c in output_cols:
+            out[c] = ""
+        results.append(out)
+
+    # ----------------------------------------------------------
+    # END OF FUNCTION — Format output dataframe (AFTER LOOP)
+    # ----------------------------------------------------------
+    df = pd.DataFrame(results)
+
+    # Column order
+    desired_order = [
+        "input",
+        "match type",
+        "match score",
+        "customer_name",
+        "customer_id",
+        "account_segmentation",
+        "country",
+        "line_of_business",
+        "level14_territory_name",
+        "email_address",
+        "first_name",
+        "last_name",
+        "job_title",
+        "sales_buying_role_code",
+    ]
+
+    desired_order = [c for c in desired_order if c in df.columns]
+
+    df = df.reindex(columns = desired_order + [c for c in df.columns if c not in desired_order])
+
+    return df
      
 # ----------------------------------------------------------
 # ACCOUNT MATCH FUNCTION — RAPIDFUZZ VERSION

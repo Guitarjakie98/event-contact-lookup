@@ -513,7 +513,7 @@ with tab2:
             """
         )
 
-    run_accounts = st.button(" Run Account Lookup", type="primary")
+    run_accounts = st.button("Run Account Lookup", type="primary")
 
     if run_accounts:
         items = [x.strip() for x in accounts_raw.splitlines()]

@@ -140,7 +140,10 @@ def find_contact_matches(emails):
     ]
 
     # Output columns are all columns except special ones
-    output_cols = [c for c in contacts.columns if c not in ["match type", "match score"]]
+    output_cols = [
+    c for c in contacts.columns
+    if c not in ["match type", "match score", "party_number"]
+]
 
     # ------------------------------------------------------
     # PROCESS INPUT EMAILS IN ORDER

@@ -66,7 +66,6 @@ def load_embeddings():
 
 # Load once at startup
 with st.spinner("Loading embeddings…"):
-    account_embeddings = load_embeddings()
 
 def normalize_name(name):
     """Clean company name and strip out legal suffixes."""

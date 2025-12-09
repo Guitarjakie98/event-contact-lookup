@@ -313,6 +313,7 @@ def find_account_matches(inputs):
         best_account_index = candidate_ids[best_local_index]
     
         row = contacts.iloc[best_account_index]
+        row = row.drop(labels=["party_number"], errors="ignore")
         final_score_percent = round(best_score * 100, 1)
     
         # --- Match categories ---

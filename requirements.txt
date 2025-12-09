@@ -4,3 +4,4 @@ rapidfuzz
 pyarrow
 sentence-transformers
 torch
+requirements

@@ -207,6 +207,7 @@ def find_contact_matches(emails):
         "first_name",
         "last_name",
         "job_title",
+        "email_address",
         "account_segmentation",
         "country",
         "line_of_business",

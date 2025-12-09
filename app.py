@@ -240,7 +240,7 @@ def find_account_matches(inputs):
     "oracle account line of business": "line_of_business",
     "ae person name": "ae_name",
     "ats team person name": "ats_name",
-    "is partner": "is partner",
+    "is partner": "ispartner",
     "arr total arr": "arr",
     "oracle account engagement score": "account_engagement_score",
     "oracle account next renewal date": "next_renewal_date",
@@ -270,57 +270,86 @@ def find_account_matches(inputs):
     cosine_matrix = util.cos_sim(input_embeddings, embeddings_all)
 
     # --- Top-K semantic candidates for each input ---
-    k = 15  # increase to 20 if you want more recall
+    k = 15
     topk_scores, topk_idx = torch.topk(cosine_matrix, k=k, dim=1)
-
-    # Process each input
+    
+    # ---------------------------------------------------
+    # PROCESS EACH INPUT
+    # ---------------------------------------------------
     for i, raw in enumerate(inputs):
         user_input = raw.strip()
         norm_input = norm_inputs[i]
-
-        # Empty input handling
+    
+        # --- Empty input handling FIRST ---
         if not norm_input:
             out = {"input": user_input, "match type": "No Match", "match score": 0}
             for c in output_cols:
                 out[c] = ""
             results.append(out)
             continue
-
-        # --- Candidate pool (only 10 rows, not 40k) ---
+    
+        # --- Normalized Exact Match ---
+        normalized_exact = contacts[contacts["normalized_account"] == norm_input]
+        if not normalized_exact.empty:
+            row = normalized_exact.iloc[0]
+            out = {
+                "input": user_input,
+                "match type": "Normalized Exact Match",
+                "match score": 100.0,
+            }
+            for display_col, actual_col in output_cols.items():
+                out[display_col] = row.get(actual_col, "")
+            results.append(out)
+            continue
+    
+        # --- Abbreviation Exact Match ---
+        if "abbreviation" in contacts.columns and norm_input in contacts["abbreviation"].values:
+            row = contacts[contacts["abbreviation"] == norm_input].iloc[0]
+            out = {
+                "input": user_input,
+                "match type": "Abbreviation Match",
+                "match score": 100.0,
+            }
+            for display_col, actual_col in output_cols.items():
+                out[display_col] = row.get(actual_col, "")
+            results.append(out)
+            continue
+    
+        # --- Candidate pool (only top-K rows) ---
         candidate_ids = topk_idx[i].cpu().numpy()
         candidate_names = [norm_names[j] for j in candidate_ids]
-
-        # --- Fuzzy scores against top-K only ---
+    
+        # --- Fuzzy scores ---
         fuzzy = np.array([fuzz.ratio(norm_input, c) / 100 for c in candidate_names])
-
-        # --- Jaccard scores against top-K only ---
+    
+        # --- Jaccard scores ---
         jac = np.array([
             len(input_tokens[i] & token_sets[j]) /
             len(input_tokens[i] | token_sets[j]) if token_sets[j] else 0
             for j in candidate_ids
         ])
-
+    
         # --- Combine scores ---
         hybrid = (
             0.65 * topk_scores[i].cpu().numpy() +
             0.25 * fuzzy +
             0.10 * jac
         )
-
+    
         best_local_index = int(np.argmax(hybrid))
         best_score = float(hybrid[best_local_index])
         best_account_index = candidate_ids[best_local_index]
-
+    
         row = contacts.iloc[best_account_index]
         final_score_percent = round(best_score * 100, 1)
-
-        # --- Match categories ---
-        if best_score >= 0.70:
-            match_type = "High Confidence Match"
-        elif best_score >= 0.55:
-            match_type = "Low Confidence Match"
-        else:
-            match_type = "No Match"
+    
+                  # --- Match categories ---
+                if best_score >= 0.70:
+                    match_type = "High Confidence Match"
+                elif best_score >= 0.55:
+                    match_type = "Low Confidence Match"
+                else:
+                    match_type = "No Match"
 
         out = {
             "input": user_input,

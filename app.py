@@ -59,11 +59,14 @@ EMBEDDINGS_URL = "https://storage.googleapis.com/citrix-event-lookup/account_emb
 
 @st.cache_resource(show_spinner=True)
 def load_embeddings():
-    st.write("Loading embeddings")
+    # Remove the st.write!
     r = requests.get(EMBEDDINGS_URL)
-    r.raise_for_status()   # Fail loudly if URL is ever incorrect
+    r.raise_for_status()
     return np.load(io.BytesIO(r.content))
 
+# Load once at startup
+with st.spinner("Loading embeddings…"):
+    account_embeddings = load_embeddings()
 # Load it once at startup
 account_embeddings = load_embeddings()
 

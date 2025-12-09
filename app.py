@@ -31,11 +31,11 @@ def resource_path(filename: str) -> str:
 
 @st.cache_data(show_spinner=True)
 def load_contacts() -> pd.DataFrame:
-    file_path = resource_path("ContactDataApp2.0.parquet")
+    file_path = resource_path("ContactDataApp2.1.parquet")
 
     if not os.path.exists(file_path):
         st.error(
-            f"Could not find event_data_for_app.parquet at:\n{file_path}\n\n"
+            f"Could not find ContactDataApp2.1.parquett at:\n{file_path}\n\n"
             "Make sure the file is in the same folder as app.py."
         )
         return pd.DataFrame()
@@ -205,7 +205,7 @@ def find_account_matches(inputs):
     results = []
 
     output_cols = {
-    "oracle account customer id": "party_number",
+    "customer_id": "customer_id",
     "oracle account customer name": "customer_name",
     "oracle account account segmentation": "account_segmentation",
     "oracle account country": "country",

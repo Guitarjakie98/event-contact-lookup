@@ -98,37 +98,33 @@ def extract_abbreviation(text: str) -> str:
     return matches[0].lower() if matches else ""
 
 
-# ----------------------------------------------------------
 # Precompute normalized fields & domain dictionary
 # ----------------------------------------------------------
 
-if "oracle account customer name" in contacts.columns:
-    contacts["normalized_account"] = contacts["oracle account customer name"].apply(normalize_name)
-    contacts["abbreviation"] = contacts["oracle account customer name"].apply(extract_abbreviation)
+if "customer_name" in contacts.columns:
+    contacts["normalized_account"] = contacts["customer_name"].apply(normalize_name)
+    contacts["abbreviation"] = contacts["customer_name"].apply(extract_abbreviation)
 
-email_cols = [c for c in contacts.columns if "email" in c]
+# Identify the email column explicitly
+email_cols = [c for c in contacts.columns if c == "email_address"]
 
 if email_cols:
     email_col = email_cols[0]
-    domain_cols = [c for c in contacts.columns if "domain" in c]
 
-    if domain_cols:
-        domain_col = domain_cols[0]
+    # Prefer explicit email_domain if present
+    if "email_domain" in contacts.columns:
+        domain_col = "email_domain"
     else:
-        contacts["derived_domain"] = contacts[email_col].apply(
+        # Fallback: compute from email
+        contacts["email_domain"] = contacts[email_col].apply(
             lambda x: x.split("@")[-1].lower() if isinstance(x, str) and "@" in x else ""
         )
-        domain_col = "derived_domain"
+        domain_col = "email_domain"
 
-    domain_lookup = (
-        contacts.sort_values(domain_col)
-                .groupby(domain_col)
-                .head(1)
-                .set_index(domain_col)
-                .to_dict("index")
-    )
 else:
-    domain_lookup = {}
+    # No email column at all — produce blank domain column
+    contacts["email_domain"] = ""
+    domain_col = "email_domain"
 
 # ----------------------------------------------------------
 # Precompute embeddings for all normalized accounts
@@ -137,38 +133,41 @@ account_names = contacts["normalized_account"].fillna("").tolist()
 account_embeddings = compute_account_embeddings(account_names)
 
 
-# ----------------------------------------------------------
-# CONTACT MATCH FUNCTION
-# ----------------------------------------------------------
-
 def find_contact_matches(emails):
     results = []
     if contacts.empty:
         return pd.DataFrame()
 
-    email_cols = [c for c in contacts.columns if "email" in c]
-    domain_cols = [c for c in contacts.columns if "domain" in c]
+    # Identify the email column explicitly
+    email_cols = [c for c in contacts.columns if c == "email_address"]
+    if not email_cols:
+        # without email column, we cannot match → return all No Match
+        return pd.DataFrame([{
+            "input": e, "match type": "No Match", "match score": 0
+        } for e in emails])
 
     email_col = email_cols[0]
 
-    if domain_cols:
-        domain_col = domain_cols[0]
+    # Determine domain column
+    if "email_domain" in contacts.columns:
+        domain_col = "email_domain"
     else:
-        contacts["derived_domain"] = contacts[email_col].apply(
-            lambda x: x.split("@")[-1].lower()
-            if isinstance(x, str) and "@" in x else ""
+        contacts["email_domain"] = contacts[email_col].apply(
+            lambda x: x.split("@")[-1].lower() if isinstance(x,str) and "@" in x else ""
         )
-        domain_col = "derived_domain"
+        domain_col = "email_domain"
 
+    # Updated personal fields using YOUR new dataset
     personal_fields = [
-        "eloqua contacts first name",
-        "eloqua contacts last name",
-        "eloqua contacts job title",
-        "eloqua contacts buying role",
-        "eloqua contacts email address",
-        "eloqua contacts do not email",
+        "first_name",
+        "last_name",
+        "job_title",
+        "sales_buying_role_code",
+        "email_address",
+        "do_not_email_flag",
     ]
 
+    # Output columns are all columns except special ones
     output_cols = [c for c in contacts.columns if c not in ["match type", "match score"]]
 
     # ------------------------------------------------------
@@ -179,117 +178,143 @@ def find_contact_matches(emails):
 
         if user_input == "":
             row = {"input": "", "match type": "No Match", "match score": 0}
-            for c in output_cols: row[c] = ""
+            for c in output_cols:
+                row[c] = ""
             results.append(row)
             continue
 
         email = user_input.lower()
 
         # Exact match
-        exact = contacts[contacts[email_col].str.lower() == email].copy()
+        exact = contacts[contacts[email_col].str.lower() == email]
         if not exact.empty:
             row = exact.iloc[0]
             out = {"input": user_input, "match type": "Exact Match", "match score": 100}
-            for c in output_cols: out[c] = row.get(c, "")
+            for c in output_cols:
+                out[c] = row.get(c, "")
             results.append(out)
             continue
 
-        # Domain match
+        # Domain match (e.g. @ibm.com → IBM accounts)
         domain = email.split("@")[-1]
-        domain_match = contacts[contacts[domain_col].str.lower() == domain].copy()
+        domain_match = contacts[contacts[domain_col].str.lower() == domain]
 
         if not domain_match.empty:
             row = domain_match.iloc[0].copy()
 
+            # Blank personal fields so we don't leak wrong contact data
             for col in personal_fields:
-                if col in row: row[col] = ""
+                if col in row:
+                    row[col] = ""
 
             out = {"input": user_input, "match type": "Domain Match", "match score": 90}
-            for c in output_cols: out[c] = row.get(c, "")
+            for c in output_cols:
+                out[c] = row.get(c, "")
             results.append(out)
             continue
 
-        # No Match
+        # No match
         out = {"input": user_input, "match type": "No Match", "match score": 0}
-        for c in output_cols: out[c] = ""
+        for c in output_cols:
+            out[c] = ""
         results.append(out)
 
     return pd.DataFrame(results)
 
-
 # ----------------------------------------------------------
 # ACCOUNT MATCH FUNCTION — RAPIDFUZZ VERSION
 # ----------------------------------------------------------
+
+
 def find_account_matches(inputs):
     if contacts.empty:
         return pd.DataFrame()
 
     results = []
-    acct_col = "oracle account customer name"
 
-    output_cols = [
-        "oracle account customer id",
-        "oracle account customer name",
-        "oracle account country",
-        "oracle account business unit",
-        "oracle account account segmentation",
-        "ats team person name",
-        "ae person name",
-        "is partner",
-        "oracle account line of business",
-        "arr total arr",
-        "arr next renewal date"
-    ]
+    output_cols = {
+    "oracle account customer id": "party_number",
+    "oracle account customer name": "customer_name",
+    "oracle account account segmentation": "account_segmentation",
+    "oracle account country": "country",
+    "oracle account line of business": "line_of_business",
+    "ae person name": "ae_name",
+    "ats team person name": "ats_name",
+    "is partner": "is partner",
+    "arr total arr": "arr",
+    "oracle account engagement score": "account_engagement_score",
+    "oracle account next renewal date": "next_renewal_date",
+}
 
-    # Preload model + embeddings
+    # Pre-load model + embeddings
     model = load_embedding_model()
     embeddings_all = account_embeddings
     norm_names = contacts["normalized_account"].tolist()
 
-    for raw in inputs:
-        user_input = raw.strip()
-        norm_input = normalize_name(user_input)
+    # --- Pre-tokenize all accounts for Jaccard ---
+    token_sets = [set(n.split()) for n in norm_names]
 
+    # --- Normalize all user inputs at once ---
+    norm_inputs = [normalize_name(x) for x in inputs]
+    input_tokens = [set(n.split()) for n in norm_inputs]
+
+    # --- Batch Encode Inputs Once (MAJOR SPEEDUP) ---
+    input_embeddings = model.encode(
+        norm_inputs,
+        convert_to_tensor=True,
+        batch_size=256,
+        show_progress_bar=False
+    )
+
+    # --- Compute cosine similarity matrix (N x M) ---
+    cosine_matrix = util.cos_sim(input_embeddings, embeddings_all)
+
+    # --- Top-K semantic candidates for each input ---
+    k = 15  # increase to 20 if you want more recall
+    topk_scores, topk_idx = torch.topk(cosine_matrix, k=k, dim=1)
+
+    # Process each input
+    for i, raw in enumerate(inputs):
+        user_input = raw.strip()
+        norm_input = norm_inputs[i]
+
+        # Empty input handling
         if not norm_input:
             out = {"input": user_input, "match type": "No Match", "match score": 0}
-            for c in output_cols: out[c] = ""
+            for c in output_cols:
+                out[c] = ""
             results.append(out)
             continue
 
-        # --- 1. Semantic similarity ---
-        emb_input = model.encode(norm_input, convert_to_tensor=True)
-        sem_scores = util.cos_sim(emb_input, embeddings_all)[0].cpu().numpy()  # numpy array (0–1)
+        # --- Candidate pool (only 10 rows, not 40k) ---
+        candidate_ids = topk_idx[i].cpu().numpy()
+        candidate_names = [norm_names[j] for j in candidate_ids]
 
-        # --- 2. Fuzzy similarity ---
-        fuzzy_scores = np.array([
-            fuzz.ratio(norm_input, cand) / 100
-            for cand in norm_names
-        ])  # numpy array (0–1)
+        # --- Fuzzy scores against top-K only ---
+        fuzzy = np.array([fuzz.ratio(norm_input, c) / 100 for c in candidate_names])
 
-        # --- 3. Token overlap (Jaccard) ---
-        input_tokens = set(norm_input.split())
-        jaccard_scores = np.array([
-            len(input_tokens.intersection(set(c.split()))) /
-            len(input_tokens.union(set(c.split()))) if c.split() else 0
-            for c in norm_names
-        ])  # numpy array (0–1)
+        # --- Jaccard scores against top-K only ---
+        jac = np.array([
+            len(input_tokens[i] & token_sets[j]) /
+            len(input_tokens[i] | token_sets[j]) if token_sets[j] else 0
+            for j in candidate_ids
+        ])
 
-        # --- 4. Weighted hybrid score ---
-        hybrid_scores = (
-            0.65 * sem_scores +
-            0.25 * fuzzy_scores +
-            0.10 * jaccard_scores
+        # --- Combine scores ---
+        hybrid = (
+            0.65 * topk_scores[i].cpu().numpy() +
+            0.25 * fuzzy +
+            0.10 * jac
         )
 
-        # Best match index
-        best_idx = int(np.argmax(hybrid_scores))
-        best_score = float(hybrid_scores[best_idx])
-        row = contacts.iloc[best_idx]
+        best_local_index = int(np.argmax(hybrid))
+        best_score = float(hybrid[best_local_index])
+        best_account_index = candidate_ids[best_local_index]
 
-        # Score → nicer %
+        row = contacts.iloc[best_account_index]
         final_score_percent = round(best_score * 100, 1)
 
-        # --- 5. Match category ---
+        # --- Match categories ---
         if best_score >= 0.70:
             match_type = "High Confidence Match"
         elif best_score >= 0.55:
@@ -303,13 +328,12 @@ def find_account_matches(inputs):
             "match score": final_score_percent,
         }
 
-        for c in output_cols:
-            out[c] = row.get(c, "") if match_type != "No Match" else ""
+        for display_col, actual_col in output_cols.items():
+            out[display_col] = row.get(actual_col, "") if match_type != "No Match" else ""
 
         results.append(out)
 
     return pd.DataFrame(results)
-
 
 # ----------------------------------------------------------
 # UI STYLING

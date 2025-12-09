@@ -30,7 +30,7 @@ def resource_path(filename: str) -> str:
 
 @st.cache_data(show_spinner=True)
 def load_contacts() -> pd.DataFrame:
-    file_path = resource_path("event_data_for_app.parquet")
+    file_path = resource_path("ContactDataApp2.0.parquet")
 
     if not os.path.exists(file_path):
         st.error(

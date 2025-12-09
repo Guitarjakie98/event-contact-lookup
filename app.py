@@ -48,6 +48,39 @@ contacts = load_contacts()
 
 
 
+def normalize_name(name):
+    """Clean company name and strip out legal suffixes."""
+    if not isinstance(name, str) or name.strip() == "":
+        return ""
+    name = name.lower()
+    name = re.sub(r"[^a-z0-9\s()]", "", name)
+    name = re.sub(
+        r"\b(inc|llc|ltd|limited|corp|corporation|co|plc|sa|sao|sarl|bv|gmbh|ag|nv)\b",
+        "",
+        name,
+    )
+    name = re.sub(r"\s+", " ", name).strip()
+    return name
+
+def extract_abbreviation(text: str) -> str:
+    """Extract abbreviation safely from parentheses."""
+    if not isinstance(text, str):
+        return ""
+    matches = re.findall(r"\((.*?)\)", text)
+    return matches[0].lower() if matches else ""
+
+# Create required columns BEFORE embeddings
+contacts["normalized_account"] = contacts["customer_name"].apply(normalize_name)
+contacts["abbreviation"] = contacts["customer_name"].apply(extract_abbreviation)
+
+# Email domain logic should also be here
+if "email_address" in contacts.columns:
+    contacts["email_domain"] = contacts["email_address"].apply(
+        lambda x: x.split("@")[-1].lower() if isinstance(x, str) and "@" in x else ""
+    )
+else:
+    contacts["email_domain"] = ""
+
 # ----------------------------------------------------------
 # Embedding Model Loader (cached)
 # ----------------------------------------------------------
@@ -64,67 +97,6 @@ def compute_account_embeddings(names_list):
     """
     model = load_embedding_model()
     return model.encode(names_list, convert_to_tensor=True, show_progress_bar=False)
-
-# ----------------------------------------------------------
-# Utility functions (DEFINED EARLY — REQUIRED)
-# ----------------------------------------------------------
-
-def similarity(a, b) -> float:
-    if not isinstance(a, str) or not isinstance(b, str):
-        return 0.0
-    return SequenceMatcher(None, a.lower(), b.lower()).ratio()
-
-
-def normalize_name(name):
-    """Clean company name and strip out legal suffixes."""
-    if not isinstance(name, str) or name.strip() == "":
-        return ""
-    name = name.lower()
-    name = re.sub(r"[^a-z0-9\s()]", "", name)
-    name = re.sub(
-        r"\b(inc|llc|ltd|limited|corp|corporation|co|plc|sa|sao|sarl|bv|gmbh|ag|nv)\b",
-        "",
-        name,
-    )
-    name = re.sub(r"\s+", " ", name).strip()
-    return name
-
-
-def extract_abbreviation(text: str) -> str:
-    """Extract abbreviation safely from parentheses."""
-    if not isinstance(text, str):
-        return ""
-    matches = re.findall(r"\((.*?)\)", text)
-    return matches[0].lower() if matches else ""
-
-
-# Precompute normalized fields & domain dictionary
-# ----------------------------------------------------------
-
-if "customer_name" in contacts.columns:
-    contacts["normalized_account"] = contacts["customer_name"].apply(normalize_name)
-    contacts["abbreviation"] = contacts["customer_name"].apply(extract_abbreviation)
-
-# Identify the email column explicitly
-email_cols = [c for c in contacts.columns if c == "email_address"]
-
-if email_cols:
-    email_col = email_cols[0]
-
-    # Prefer explicit email_domain if present
-    if "email_domain" in contacts.columns:
-        domain_col = "email_domain"
-    else:
-        # Fallback: compute from email
-        contacts["email_domain"] = contacts[email_col].apply(
-            lambda x: x.split("@")[-1].lower() if isinstance(x, str) and "@" in x else ""
-        )
-        domain_col = "email_domain"
-
-else:
-    # No email column at all — produce blank domain column
-    contacts["email_domain"] = ""
-    domain_col = "email_domain"
 
 # ----------------------------------------------------------
 # Precompute embeddings for all normalized accounts

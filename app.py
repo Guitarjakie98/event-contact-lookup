@@ -51,21 +51,22 @@ contacts = load_contacts()
 # ----------------------------------------------------------
 
 def load_embeddings():
-    # IMPORTANT: use the exact path we verified in terminal
-    gd_path = "/Users/jacobmarchand/Library/CloudStorage/GoogleDrive-jacob.j.marchand@gmail.com/My Drive/Embeddings/account_embeddings.npy"
-
     possible_paths = [
-        "account_embeddings.npy",  # Local folder
-        gd_path,
+        "account_embeddings.npy",  # local folder next to app.py
+        os.path.abspath("account_embeddings.npy"),  # absolute version
+        os.path.expanduser("~/EventContactLookupWeb/account_embeddings.npy"),
+        os.path.expanduser("/Users/jacobmarchand/EventContactLookupWeb/account_embeddings.npy"),
+        os.path.expanduser("~/Google Drive/Embeddings/account_embeddings.npy"),
+        os.path.expanduser("~/GoogleDrive/Embeddings/account_embeddings.npy"),
+        os.path.expanduser("~/Library/CloudStorage/GoogleDrive-jacob.j.marchand@gmail.com/My Drive/Embeddings/account_embeddings.npy"),
     ]
 
-    st.write("🔍 Checking these locations for embeddings:")
-    for p in possible_paths:
-        st.write(f"{p} → exists: {os.path.exists(p)}")
-
+    st.write("🔎 Checking these locations for embeddings:\n")
     for path in possible_paths:
-        if os.path.exists(path):
-            st.success(f"📦 Loaded embeddings from: {path}")
+        exists = os.path.exists(path)
+        st.write(f"{path} → exists: {exists}")
+        if exists:
+            st.write(f"📦 Loaded embeddings from: {path}")
             return np.load(path)
 
     st.error("❌ Could not find account_embeddings.npy in any known location.")

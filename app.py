@@ -208,12 +208,13 @@ def find_contact_matches(emails):
         "country",
         "line_of_business",
         "level14_territory_name",
-        "email_address",
-        "first_name",
-        "last_name",
-        "job_title",
-        "sales_buying_role_code",
-    ]
+        "arr",
+        "ae_name",
+        "ats_name",
+        "ispartner",
+        "account_engagement_score",
+        "next_renewal_date",
+]
 
     desired_order = [c for c in desired_order if c in df.columns]
 
@@ -224,7 +225,9 @@ def find_contact_matches(emails):
 # ----------------------------------------------------------
 # ACCOUNT MATCH FUNCTION — RAPIDFUZZ VERSION
 # ----------------------------------------------------------
-
+@st.cache_resource
+def load_embedding_model():
+    return SentenceTransformer("all-MiniLM-L6-v2")
 
 def find_account_matches(inputs):
     if contacts.empty:
@@ -232,20 +235,20 @@ def find_account_matches(inputs):
 
     results = []
 
-    output_cols = [
-    "customer_name",
-    "customer_id",
-    "account_segmentation",
-    "country",
-    "line_of_business",
-    "level14_territory_name",
-    "email_address",
-    "first_name",
-    "last_name",
-    "job_title",
-    "sales_buying_role_code",
-]
-
+    output_cols = {
+        "customer_name": "customer_name",
+        "customer_id": "customer_id",
+        "account_segmentation": "account_segmentation",
+        "country": "country",
+        "line_of_business": "line_of_business",
+        "level14_territory_name": "level14_territory_name",
+        "arr": "arr",
+        "ae_name": "ae_name",
+        "ats_name": "ats_name",
+        "ispartner": "ispartner",
+        "account_engagement_score": "account_engagement_score",
+        "next_renewal_date": "next_renewal_date",
+    }
     # Pre-load model + embeddings
     model = load_embedding_model()
     embeddings_all = account_embeddings

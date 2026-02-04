@@ -4,8 +4,6 @@ import numpy as np
 import re
 from difflib import SequenceMatcher
 from rapidfuzz import fuzz, process
-from sentence_transformers import SentenceTransformer, util
-import torch
 import pandas as pd
 import streamlit as st     # last import
 import requests
@@ -58,12 +56,7 @@ import streamlit as st
 
 EMBEDDINGS_URL = "https://storage.googleapis.com/citrix-event-lookup/account_embeddings.npy"
 
-@st.cache_resource(show_spinner=True)
-def load_embeddings():
-    # Remove the st.write!
-    r = requests.get(EMBEDDINGS_URL)
-    r.raise_for_status()
-    return np.load(io.BytesIO(r.content))
+
 
 # Load once at startup
 with st.spinner("Loading embeddings…"):

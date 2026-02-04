@@ -4,6 +4,14 @@ import re
 from rapidfuzz import fuzz
 import pandas as pd
 import streamlit as st
+import subprocess
+
+INDEX_PATH = "data/account_index.faiss"
+META_PATH = "data/account_metadata.parquet"
+
+if not os.path.exists(INDEX_PATH):
+    subprocess.run(["python", "build_index.py"], check=True)
+
 
 
 # MUST be the first Streamlit command

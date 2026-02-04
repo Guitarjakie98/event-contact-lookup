@@ -10,6 +10,7 @@ import pandas as pd
 import streamlit as st     # last import
 import requests
 
+
 # MUST be the first Streamlit command
 st.set_page_config(
     page_title="Citrix Event Lookup Tool",
@@ -229,9 +230,9 @@ def find_contact_matches(emails):
 # ----------------------------------------------------------
 # ACCOUNT MATCH FUNCTION — RAPIDFUZZ VERSION
 # ----------------------------------------------------------
-@st.cache_resource
-def load_embedding_model():
-    return SentenceTransformer("all-MiniLM-L6-v2")
+#@st.cache_resource
+#def load_embedding_model():
+   # return SentenceTransformer("all-MiniLM-L6-v2")
 
 def find_account_matches(inputs):
     if contacts.empty:
@@ -253,32 +254,60 @@ def find_account_matches(inputs):
         "account_engagement_score": "account_engagement_score",
         "next_renewal_date": "next_renewal_date",
     }
-    # Pre-load model + embeddings
-    model = load_embedding_model()
-    embeddings_all = account_embeddings
-    norm_names = contacts["normalized_account"].tolist()
 
-    # --- Pre-tokenize all accounts for Jaccard ---
-    token_sets = [set(n.split()) for n in norm_names]
-
-    # --- Normalize all user inputs at once ---
-    norm_inputs = [normalize_name(x) for x in inputs]
-    input_tokens = [set(n.split()) for n in norm_inputs]
-
-    # --- Batch Encode Inputs Once (MAJOR SPEEDUP) ---
-    input_embeddings = model.encode(
-        norm_inputs,
-        convert_to_tensor=True,
-        batch_size=256,
-        show_progress_bar=False
-    )
-
-    # --- Compute cosine similarity matrix (N x M) ---
-    cosine_matrix = util.cos_sim(input_embeddings, embeddings_all)
-
-    # --- Top-K semantic candidates for each input ---
     k = 15
-    topk_scores, topk_idx = torch.topk(cosine_matrix, k=k, dim=1)
+
+    for raw in inputs:
+        user_input = raw.strip()
+        norm_input = normalize_name(user_input)
+
+        # ---------------------------
+        # Empty
+        # ---------------------------
+        if not norm_input:
+            out = {"input": user_input, "match type": "No Match", "match score": 0}
+            for c in output_cols:
+                out[c] = ""
+            results.append(out)
+            continue
+
+        # ---------------------------
+        # Query FAISS
+        # ---------------------------
+        query_vec = faiss_index.reconstruct(
+            faiss_index.ntotal - 1
+        ).reshape(1, -1)
+
+        D, I = faiss_index.search(query_vec, k)
+
+        candidate_rows = account_meta.iloc[I[0]]
+
+        best_row = candidate_rows.iloc[0]
+
+        score = round((1 - D[0][0]) * 100, 1)
+
+        if score >= 70:
+            match_type = "High Confidence Match"
+        elif score >= 55:
+            match_type = "Low Confidence Match"
+        else:
+            match_type = "No Match"
+
+        out = {
+            "input": user_input,
+            "match type": match_type,
+            "match score": score,
+        }
+
+        for display_col, actual_col in output_cols.items():
+            out[display_col] = (
+                best_row.get(actual_col, "") if match_type != "No Match" else ""
+            )
+
+        results.append(out)
+
+    return pd.DataFrame(results)
+
     
     # ---------------------------------------------------
     # PROCESS EACH INPUT

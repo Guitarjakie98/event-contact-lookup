@@ -1,10 +1,8 @@
 import os
-import numpy as np
 import re
 from rapidfuzz import fuzz
 import pandas as pd
 import streamlit as st
-import subprocess
 
 GENERIC_DOMAINS = {
     "gmail.com", "googlemail.com",
@@ -42,13 +40,6 @@ GENERIC_DOMAINS = {
     "tutanota.com", "hushmail.com",
     "mail.ru",
 }
-
-INDEX_PATH = "data/account_index.faiss"
-META_PATH = "data/account_metadata.parquet"
-
-if not os.path.exists(INDEX_PATH):
-    subprocess.run(["python", "build_index.py"], check=True)
-
 
 
 # MUST be the first Streamlit command

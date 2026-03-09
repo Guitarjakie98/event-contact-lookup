@@ -45,11 +45,41 @@ Contacts with personal/generic email domains (Gmail, Yahoo, Hotmail, Outlook, iC
 
 ---
 
+## Updating the Data
+
+When you have a new Eloqua/Oracle export:
+
+1. Drop the CSV or Excel file into the `data/` folder
+2. Run:
+   ```bash
+   python make_parquet.py
+   ```
+   If multiple files are in `data/`, you'll get a numbered prompt to pick one:
+   ```
+   Files in data/:
+     [1] export_2026-03-09.xlsx
+     [2] export_2026-01-15.csv
+   Pick a file [1-2]:
+   ```
+3. The script validates required columns, then writes `ContactDataApp2.1.parquet` next to itself
+4. Restart the server to load the new data:
+   ```bash
+   uvicorn server:app --reload
+   ```
+
+You can also pass a path directly to skip the prompt:
+```bash
+python make_parquet.py "path/to/export.xlsx"
+```
+
+---
+
 ## Data Files
 
 | File | Role |
 |---|---|
 | `ContactDataApp2.1.parquet` | Main contact/account database — loaded by `server.py` at startup |
+| `data/` | Drop zone for raw Eloqua exports (CSV or Excel) — not committed to git |
 
 ---
 

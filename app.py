@@ -6,6 +6,43 @@ import pandas as pd
 import streamlit as st
 import subprocess
 
+GENERIC_DOMAINS = {
+    "gmail.com", "googlemail.com",
+    "hotmail.com", "hotmail.co.uk", "hotmail.fr", "hotmail.de", "hotmail.es",
+    "hotmail.it", "hotmail.ca", "hotmail.com.br", "hotmail.com.ar",
+    "live.com", "live.co.uk", "live.fr", "live.de", "live.ca",
+    "msn.com", "outlook.com", "outlook.com.br",
+    "yahoo.com", "yahoo.co.uk", "yahoo.co.in", "yahoo.fr", "yahoo.de",
+    "yahoo.es", "yahoo.it", "yahoo.ca", "yahoo.com.br", "yahoo.com.ar",
+    "yahoo.com.au", "yahoo.com.mx", "ymail.com",
+    "aol.com",
+    "icloud.com", "me.com", "mac.com",
+    "protonmail.com", "proton.me",
+    "mail.com", "email.com",
+    "zoho.com",
+    "gmx.com", "gmx.net", "gmx.de",
+    "web.de", "t-online.de",
+    "laposte.net", "orange.fr", "wanadoo.fr", "free.fr", "sfr.fr",
+    "libero.it",
+    "yandex.com", "yandex.ru",
+    "qq.com", "163.com", "126.com",
+    "rediffmail.com",
+    "terra.com.br", "uol.com.br", "bol.com.br",
+    "naver.com",
+    "comcast.net", "verizon.net", "att.net", "sbcglobal.net",
+    "cox.net", "charter.net", "earthlink.net",
+    "shaw.ca", "rogers.com", "sympatico.ca",
+    "bigpond.com", "bigpond.net.au", "optusnet.com.au",
+    "btinternet.com", "virginmedia.com", "sky.com",
+    "tiscali.it", "alice.it",
+    "seznam.cz",
+    "wp.pl", "onet.pl", "interia.pl",
+    "inbox.com",
+    "fastmail.com", "fastmail.fm",
+    "tutanota.com", "hushmail.com",
+    "mail.ru",
+}
+
 INDEX_PATH = "data/account_index.faiss"
 META_PATH = "data/account_metadata.parquet"
 
@@ -155,8 +192,15 @@ def find_contact_matches(emails):
             results.append(out)
             continue
 
-        # Domain match
+        # Domain match — skip personal/generic email providers
         domain = email.split("@")[-1]
+        if domain in GENERIC_DOMAINS:
+            out = {"input": user_input, "match type": "Skipped - Personal Email", "match score": 0}
+            for c in output_cols:
+                out[c] = ""
+            results.append(out)
+            continue
+
         domain_match = contacts[contacts[domain_col].str.lower() == domain]
 
         if not domain_match.empty:

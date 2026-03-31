@@ -40,13 +40,22 @@ OPTIONAL_COLS_CLEAN = [
     "country",
     "line_of_business",
     "ae_name",
-    "level14_territory_name",
+    "level15_territory_name",
     "ats_name",
     "arr",
     "next_renewal_date",
     "ispartner",
+    "partner_of_record_name",
     "account_engagement_score",
 ]
+
+# BigQuery export rename map
+BQ_RENAME = {
+    "account_name": "customer_name",
+    "account_country": "country",
+    "is_partner": "ispartner",
+    "has_partner": "ispartner",
+}
 
 OUTPUT_NAME = "ContactDataApp2.1.parquet"
 DATA_DIR = Path(__file__).parent / "data"
@@ -95,12 +104,21 @@ def main(input_path: str = None) -> None:
 
     df.columns = [c.strip().lower() for c in df.columns]
 
-    # Detect format: snake_case (pre-cleaned) vs raw Eloqua
-    if "customer_name" in df.columns or "email_address" in df.columns:
-        required, optional, fmt = REQUIRED_COLS_CLEAN, OPTIONAL_COLS_CLEAN, "pre-cleaned"
+    # Detect format: snake_case (pre-cleaned) vs BigQuery vs raw Eloqua
+    if "account_name" in df.columns and "customer_name" not in df.columns:
+        fmt = "BigQuery"
+        print(f"Detected format: {fmt}")
+        df = df.rename(columns=BQ_RENAME)
+        df["email_domain"] = df["email_address"].str.split("@").str[-1].str.lower()
+        required, optional = REQUIRED_COLS_CLEAN, OPTIONAL_COLS_CLEAN
+    elif "customer_name" in df.columns or "email_address" in df.columns:
+        fmt = "pre-cleaned"
+        print(f"Detected format: {fmt}")
+        required, optional = REQUIRED_COLS_CLEAN, OPTIONAL_COLS_CLEAN
     else:
-        required, optional, fmt = REQUIRED_COLS_RAW, OPTIONAL_COLS_RAW, "raw Eloqua"
-    print(f"Detected format: {fmt}")
+        fmt = "raw Eloqua"
+        print(f"Detected format: {fmt}")
+        required, optional = REQUIRED_COLS_RAW, OPTIONAL_COLS_RAW
 
     missing_required = [c for c in required if c not in df.columns]
     if missing_required:

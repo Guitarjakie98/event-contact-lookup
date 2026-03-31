@@ -87,7 +87,7 @@ rename_map = {
     "oracle account country": "country",
     "oracle account line of business": "line_of_business",
     "ae person name": "ae_name",
-    "ae level14 territory name": "level14_territory_name",
+    "ae level14 territory name": "level15_territory_name",
     "ats team person name": "ats_name",
     "arr total arr": "arr",
     "arr next renewal date": "next_renewal_date",
@@ -137,6 +137,9 @@ def find_account_matches(inputs: List[str]):
                 "customer_id": row["customer_id"],
                 "arr": row.get("arr"),
                 "ae_name": row.get("ae_name"),
+                "ispartner": row.get("ispartner"),
+                "level15_territory_name": row.get("level15_territory_name"),
+                "partner_of_record_name": row.get("partner_of_record_name"),
             }
         else:
             entry = {
@@ -205,6 +208,7 @@ def find_title_to_account_matches(pairs):
                 "contact_name": f"{row['first_name']} {row['last_name']}",
                 "job_title": row["job_title"],
                 "title_score": score,
+                "partner_of_record_name": row.get("partner_of_record_name"),
             })
 
     return pd.DataFrame(results)

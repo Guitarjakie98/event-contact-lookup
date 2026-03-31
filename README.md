@@ -72,6 +72,31 @@ You can also pass a path directly to skip the prompt:
 python make_parquet.py "path/to/export.xlsx"
 ```
 
+### Input File Fields
+
+The script accepts either **raw Eloqua exports** (verbose column names) or **pre-cleaned files** (snake_case columns). It auto-detects the format by checking whether columns like `customer_name` or `email_address` are already present. Column names are lowercased and stripped before validation.
+
+| Raw Eloqua Column | Pre-cleaned Column | Required? | Description |
+|---|---|---|---|
+| `oracle account customer name` | `customer_name` | Required | Account/company display name |
+| `oracle account customer id` | `customer_id` | Required | Master account identifier |
+| `eloqua contacts email address` | `email_address` | Required | Contact email (exact match key) |
+| `eloqua contacts email address domain` | `email_domain` | Required | Email domain (used for domain fallback) |
+| `eloqua contacts first name` | `first_name` | Optional | Contact first name |
+| `eloqua contacts last name` | `last_name` | Optional | Contact last name |
+| `eloqua contacts job title` | `job_title` | Optional | Job title (used in Title to Account tab) |
+| `oracle account account segmentation` | `account_segmentation` | Optional | Account tier (Enterprise, RM, etc.) |
+| `oracle account country` | `country` | Optional | Account country |
+| `oracle account line of business` | `line_of_business` | Optional | Line of business |
+| `ae person name` | `ae_name` | Optional | Account executive name |
+| `ae level14 territory name` | `level15_territory_name` | Optional | Territory name |
+| `ats team person name` | `ats_name` | Optional | ATS person name |
+| `arr total arr` | `arr` | Optional | Annual recurring revenue |
+| `arr next renewal date` | `next_renewal_date` | Optional | Next renewal date |
+| `is partner` / `has_partner` | `ispartner` | Optional | Partner flag |
+| — | `partner_of_record_name` | Optional | Partner company name |
+| `eloqua accounts account engagement score` | `account_engagement_score` | Optional | Engagement score |
+
 ---
 
 ## Data Files

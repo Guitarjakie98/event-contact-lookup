@@ -195,7 +195,12 @@ def find_contact_matches(emails):
         domain_match = contacts[contacts[domain_col].str.lower() == domain]
 
         if not domain_match.empty:
-            row = domain_match.iloc[0].copy()
+            # Pick the account with the most contacts on this domain
+            top_account = (
+                domain_match.groupby("customer_id").size()
+                .idxmax()
+            )
+            row = domain_match[domain_match["customer_id"] == top_account].iloc[0].copy()
 
             # Blank personal fields so we don’t leak wrong contact data
             for col in personal_fields:

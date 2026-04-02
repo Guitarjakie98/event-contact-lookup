@@ -47,6 +47,7 @@ OPTIONAL_COLS_CLEAN = [
     "ispartner",
     "partner_of_record_name",
     "account_engagement_score",
+    "prime_geo",
 ]
 
 # BigQuery export rename map
@@ -55,11 +56,15 @@ BQ_RENAME = {
     "account_country": "country",
     "is_partner": "ispartner",
     "has_partner": "ispartner",
+    "geo": "prime_geo",
 }
 
 OUTPUT_NAME = "ContactDataApp2.1.parquet"
 DATA_DIR = Path(__file__).parent / "data"
 SUPPORTED_EXTS = {".csv", ".xlsx", ".xls"}
+
+# CX Accounts file for Prime Geo lookup
+CX_ACCOUNTS_PATH = Path(__file__).parent.parent.parent / "master_data" / "CX_Accounts_4_2_26.csv"
 
 
 def pick_input_file() -> Path:
@@ -130,6 +135,27 @@ def main(input_path: str = None) -> None:
     for c in optional:
         if c not in df.columns:
             print(f"  Warning: optional column not found: '{c}'")
+
+    # Merge Prime Geo from CX Accounts (only if prime_geo not already in the data)
+    if "prime_geo" not in df.columns and CX_ACCOUNTS_PATH.exists():
+        print(f"Merging Prime Geo from {CX_ACCOUNTS_PATH.name} ...")
+        cx = pd.read_csv(CX_ACCOUNTS_PATH, low_memory=False)
+        cx.columns = [c.strip().lower() for c in cx.columns]
+        # Build customer_id -> prime_geo lookup (one row per customer)
+        geo_lookup = (
+            cx[["bi customer id", "prime geo"]]
+            .drop_duplicates(subset="bi customer id")
+            .rename(columns={"bi customer id": "customer_id", "prime geo": "prime_geo"})
+        )
+        df = df.merge(geo_lookup, on="customer_id", how="left")
+        df["prime_geo"] = df["prime_geo"].fillna("")
+        matched = (df["prime_geo"] != "").sum()
+        print(f"  Matched Prime Geo for {matched:,} / {len(df):,} rows")
+    elif "prime_geo" in df.columns:
+        df["prime_geo"] = df["prime_geo"].fillna("")
+        print(f"  Prime Geo already in data ({(df['prime_geo'] != '').sum():,} rows populated)")
+    else:
+        print(f"  Warning: CX Accounts file not found at {CX_ACCOUNTS_PATH}, skipping Prime Geo")
 
     output_path = Path(__file__).parent / OUTPUT_NAME
     df.to_parquet(output_path, index=False)

@@ -159,13 +159,13 @@ _CONTACT_COLUMN_ORDER = [
     "business_unit",
     "country",
     "prime_geo",
+    "overlay_geo",
     "level15_territory_name",
     "arr",
     "ae_name",
     "ats_name",
     "ats_email",
     "ispartner",
-    "account_engagement_score",
     "next_renewal_date",
 ]
 
@@ -175,13 +175,13 @@ _ACCOUNT_OUTPUT_COLS = {
     "account_segmentation": "account_segmentation",
     "country": "country",
     "prime_geo": "prime_geo",
+    "overlay_geo": "overlay_geo",
     "level15_territory_name": "level15_territory_name",
     "arr": "arr",
     "ae_name": "ae_name",
     "ats_name": "ats_name",
     "ats_email": "ats_email",
     "ispartner": "ispartner",
-    "account_engagement_score": "account_engagement_score",
     "next_renewal_date": "next_renewal_date",
 }
 
@@ -486,9 +486,9 @@ def find_title_to_account_matches(
         "input_account", "input_job_title", "match type", "match score",
         "customer_name", "customer_id", "first_name", "last_name",
         "job_title", "email_address", "account_segmentation", "country",
-        "prime_geo", "level15_territory_name", "arr", "ae_name",
+        "prime_geo", "overlay_geo", "level15_territory_name", "arr", "ae_name",
         "ats_name", "ats_email", "ispartner",
-        "account_engagement_score", "next_renewal_date",
+        "next_renewal_date",
     ]
     desired_order = [c for c in desired_order if c in df.columns]
     return df.reindex(columns=desired_order)

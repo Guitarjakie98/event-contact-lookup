@@ -25,7 +25,7 @@ def resource_path(filename: str) -> str:
 
 @st.cache_data(show_spinner=True)
 def load_contacts() -> pd.DataFrame:
-    file_path = resource_path("ContactDataApp2.1.parquet")
+    file_path = os.path.join(os.path.dirname(__file__), "..", "..", "master_data", "ContactDataApp2.1.parquet")
 
     if not os.path.exists(file_path):
         st.error(

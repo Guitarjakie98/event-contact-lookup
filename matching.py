@@ -261,79 +261,13 @@ def find_contact_matches(contacts: pd.DataFrame, emails: List[str]) -> pd.DataFr
     return df.reindex(columns=desired_order)
 
 
-def _match_one_account(args):
-    """Match a single company name. Used by find_account_matches for parallel execution."""
-    raw, norm_lookup, abbr_lookup, account_names_list, account_rows = args
-    user_input = raw.strip()
-    norm_input = normalize_name(user_input)
+def _build_account_index(unique_accounts: pd.DataFrame):
+    """Build a TF-IDF n-gram index for fast candidate retrieval."""
+    from sklearn.feature_extraction.text import TfidfVectorizer
 
-    # Empty input
-    if not norm_input:
-        out = {"input": user_input, "match type": "No Match", "match score": 0}
-        for c in _ACCOUNT_OUTPUT_COLS:
-            out[c] = ""
-        return out
-
-    # Normalized Exact Match
-    if norm_input in norm_lookup:
-        row = account_rows[norm_lookup[norm_input]]
-        out = {"input": user_input, "match type": "Normalized Exact Match", "match score": 100.0}
-        for display_col, actual_col in _ACCOUNT_OUTPUT_COLS.items():
-            out[display_col] = row.get(actual_col, "")
-        return out
-
-    # Abbreviation Exact Match
-    if norm_input in abbr_lookup:
-        row = account_rows[abbr_lookup[norm_input]]
-        out = {"input": user_input, "match type": "Abbreviation Match", "match score": 100.0}
-        for display_col, actual_col in _ACCOUNT_OUTPUT_COLS.items():
-            out[display_col] = row.get(actual_col, "")
-        return out
-
-    # Fuzzy matching — ratio first, token_sort_ratio only if ratio misses
-    match = rfuzz_process.extractOne(
-        norm_input, account_names_list, scorer=fuzz.ratio,
-        processor=None, score_cutoff=80,
-    )
-    if not match:
-        match = rfuzz_process.extractOne(
-            norm_input, account_names_list, scorer=fuzz.token_sort_ratio,
-            processor=None, score_cutoff=80,
-        )
-
-    if match and match[1] >= 90:
-        row = account_rows[match[2]]
-        out = {"input": user_input, "match type": "High Confidence Match", "match score": float(match[1])}
-        for display_col, actual_col in _ACCOUNT_OUTPUT_COLS.items():
-            out[display_col] = row.get(actual_col, "")
-    elif match and match[1] >= 80:
-        row = account_rows[match[2]]
-        out = {"input": user_input, "match type": "Possible Match", "match score": float(match[1])}
-        for display_col, actual_col in _ACCOUNT_OUTPUT_COLS.items():
-            out[display_col] = row.get(actual_col, "")
-    else:
-        out = {"input": user_input, "match type": "No Match", "match score": float(match[1]) if match else 0}
-        for c in _ACCOUNT_OUTPUT_COLS:
-            out[c] = ""
-
-    return out
-
-
-def find_account_matches(contacts: pd.DataFrame, inputs: List[str]) -> pd.DataFrame:
-    """Match company names against the account database.
-
-    Match order: normalized exact -> abbreviation -> fuzzy (>=90 threshold).
-    Returns one row per input, in input order.
-    Uses multiprocessing for large batches.
-    """
-    if contacts.empty:
-        return pd.DataFrame()
-
-    # Get unique accounts for matching
-    unique_accounts = contacts.drop_duplicates(subset="customer_id", keep="first")
     account_names_list = unique_accounts["normalized_account"].tolist()
 
-    # Build dict lookups for exact matching (much faster than DataFrame filtering)
+    # Build dict lookups for exact matching
     norm_lookup = {}
     abbr_lookup = {}
     account_rows = []
@@ -347,17 +281,111 @@ def find_account_matches(contacts: pd.DataFrame, inputs: List[str]) -> pd.DataFr
         if abbr and abbr not in abbr_lookup:
             abbr_lookup[abbr] = idx
 
-    # For small batches, run sequentially; for large batches, use multiprocessing
-    args_list = [(raw, norm_lookup, abbr_lookup, account_names_list, account_rows) for raw in inputs]
+    # Build TF-IDF index using character n-grams (2-4 chars)
+    vectorizer = TfidfVectorizer(analyzer="char_wb", ngram_range=(2, 4))
+    tfidf_matrix = vectorizer.fit_transform(account_names_list)
 
-    if len(inputs) > 50:
-        from concurrent.futures import ThreadPoolExecutor
-        import os
-        workers = min(os.cpu_count() or 1, 4)
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            results = list(pool.map(_match_one_account, args_list))
-    else:
-        results = [_match_one_account(a) for a in args_list]
+    return {
+        "names": account_names_list,
+        "rows": account_rows,
+        "norm_lookup": norm_lookup,
+        "abbr_lookup": abbr_lookup,
+        "vectorizer": vectorizer,
+        "tfidf_matrix": tfidf_matrix,
+    }
+
+
+def find_account_matches(contacts: pd.DataFrame, inputs: List[str], _index_cache={}) -> pd.DataFrame:
+    """Match company names against the account database.
+
+    Match order: normalized exact -> abbreviation -> fuzzy via TF-IDF candidates.
+    Returns one row per input, in input order.
+    Uses a TF-IDF n-gram index to narrow candidates before fuzzy matching.
+    """
+    if contacts.empty:
+        return pd.DataFrame()
+
+    # Build or reuse the index (cached across calls within the same process)
+    cache_key = len(contacts)
+    if cache_key not in _index_cache:
+        unique_accounts = contacts.drop_duplicates(subset="customer_id", keep="first")
+        _index_cache.clear()
+        _index_cache[cache_key] = _build_account_index(unique_accounts)
+    idx = _index_cache[cache_key]
+
+    norm_lookup = idx["norm_lookup"]
+    abbr_lookup = idx["abbr_lookup"]
+    account_names_list = idx["names"]
+    account_rows = idx["rows"]
+    vectorizer = idx["vectorizer"]
+    tfidf_matrix = idx["tfidf_matrix"]
+
+    TOP_K = 50  # number of TF-IDF candidates to fuzzy match against
+
+    results = []
+    for raw in inputs:
+        user_input = raw.strip()
+        norm_input = normalize_name(user_input)
+
+        # Empty input
+        if not norm_input:
+            out = {"input": user_input, "match type": "No Match", "match score": 0}
+            for c in _ACCOUNT_OUTPUT_COLS:
+                out[c] = ""
+            results.append(out)
+            continue
+
+        # Normalized Exact Match
+        if norm_input in norm_lookup:
+            row = account_rows[norm_lookup[norm_input]]
+            out = {"input": user_input, "match type": "Normalized Exact Match", "match score": 100.0}
+            for display_col, actual_col in _ACCOUNT_OUTPUT_COLS.items():
+                out[display_col] = row.get(actual_col, "")
+            results.append(out)
+            continue
+
+        # Abbreviation Exact Match
+        if norm_input in abbr_lookup:
+            row = account_rows[abbr_lookup[norm_input]]
+            out = {"input": user_input, "match type": "Abbreviation Match", "match score": 100.0}
+            for display_col, actual_col in _ACCOUNT_OUTPUT_COLS.items():
+                out[display_col] = row.get(actual_col, "")
+            results.append(out)
+            continue
+
+        # TF-IDF candidate retrieval + fuzzy matching on top candidates only
+        query_vec = vectorizer.transform([norm_input])
+        scores = (tfidf_matrix @ query_vec.T).toarray().ravel()
+        top_indices = scores.argsort()[-TOP_K:][::-1]
+        candidates = [account_names_list[i] for i in top_indices]
+
+        # Fuzzy match against only the top candidates
+        match = rfuzz_process.extractOne(
+            norm_input, candidates, scorer=fuzz.ratio,
+            processor=None, score_cutoff=80,
+        )
+        if not match:
+            match = rfuzz_process.extractOne(
+                norm_input, candidates, scorer=fuzz.token_sort_ratio,
+                processor=None, score_cutoff=80,
+            )
+
+        if match:
+            # Map back to the original index
+            original_idx = top_indices[candidates.index(match[0])]
+            row = account_rows[original_idx]
+            if match[1] >= 90:
+                out = {"input": user_input, "match type": "High Confidence Match", "match score": float(match[1])}
+            else:
+                out = {"input": user_input, "match type": "Possible Match", "match score": float(match[1])}
+            for display_col, actual_col in _ACCOUNT_OUTPUT_COLS.items():
+                out[display_col] = row.get(actual_col, "")
+        else:
+            out = {"input": user_input, "match type": "No Match", "match score": 0}
+            for c in _ACCOUNT_OUTPUT_COLS:
+                out[c] = ""
+
+        results.append(out)
 
     return pd.DataFrame(results)
 

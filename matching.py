@@ -295,102 +295,103 @@ def find_contact_matches(contacts: pd.DataFrame, emails: List[str]) -> pd.DataFr
     return df.reindex(columns=desired_order)
 
 
+def _match_one_account(args):
+    """Match a single company name. Used by find_account_matches for parallel execution."""
+    raw, norm_lookup, abbr_lookup, account_names_list, account_rows = args
+    user_input = raw.strip()
+    norm_input = normalize_name(user_input)
+
+    # Empty input
+    if not norm_input:
+        out = {"input": user_input, "match type": "No Match", "match score": 0}
+        for c in _ACCOUNT_OUTPUT_COLS:
+            out[c] = ""
+        return out
+
+    # Normalized Exact Match
+    if norm_input in norm_lookup:
+        row = account_rows[norm_lookup[norm_input]]
+        out = {"input": user_input, "match type": "Normalized Exact Match", "match score": 100.0}
+        for display_col, actual_col in _ACCOUNT_OUTPUT_COLS.items():
+            out[display_col] = row.get(actual_col, "")
+        return out
+
+    # Abbreviation Exact Match
+    if norm_input in abbr_lookup:
+        row = account_rows[abbr_lookup[norm_input]]
+        out = {"input": user_input, "match type": "Abbreviation Match", "match score": 100.0}
+        for display_col, actual_col in _ACCOUNT_OUTPUT_COLS.items():
+            out[display_col] = row.get(actual_col, "")
+        return out
+
+    # Fuzzy matching — ratio first, token_sort_ratio only if ratio misses
+    match = rfuzz_process.extractOne(
+        norm_input, account_names_list, scorer=fuzz.ratio,
+        processor=None, score_cutoff=80,
+    )
+    if not match:
+        match = rfuzz_process.extractOne(
+            norm_input, account_names_list, scorer=fuzz.token_sort_ratio,
+            processor=None, score_cutoff=80,
+        )
+
+    if match and match[1] >= 90:
+        row = account_rows[match[2]]
+        out = {"input": user_input, "match type": "High Confidence Match", "match score": float(match[1])}
+        for display_col, actual_col in _ACCOUNT_OUTPUT_COLS.items():
+            out[display_col] = row.get(actual_col, "")
+    elif match and match[1] >= 80:
+        row = account_rows[match[2]]
+        out = {"input": user_input, "match type": "Possible Match", "match score": float(match[1])}
+        for display_col, actual_col in _ACCOUNT_OUTPUT_COLS.items():
+            out[display_col] = row.get(actual_col, "")
+    else:
+        out = {"input": user_input, "match type": "No Match", "match score": float(match[1]) if match else 0}
+        for c in _ACCOUNT_OUTPUT_COLS:
+            out[c] = ""
+
+    return out
+
+
 def find_account_matches(contacts: pd.DataFrame, inputs: List[str]) -> pd.DataFrame:
     """Match company names against the account database.
 
     Match order: normalized exact -> abbreviation -> fuzzy (>=90 threshold).
     Returns one row per input, in input order.
+    Uses multiprocessing for large batches.
     """
     if contacts.empty:
         return pd.DataFrame()
 
-    results = []
-
     # Get unique accounts for matching
     unique_accounts = contacts.drop_duplicates(subset="customer_id", keep="first")
-    # Pre-built list for rfuzz_process.extractOne
     account_names_list = unique_accounts["normalized_account"].tolist()
 
-    for raw in inputs:
-        user_input = raw.strip()
-        norm_input = normalize_name(user_input)
+    # Build dict lookups for exact matching (much faster than DataFrame filtering)
+    norm_lookup = {}
+    abbr_lookup = {}
+    account_rows = []
+    for idx, (_, row) in enumerate(unique_accounts.iterrows()):
+        row_dict = row.to_dict()
+        account_rows.append(row_dict)
+        norm_name = row_dict.get("normalized_account", "")
+        if norm_name and norm_name not in norm_lookup:
+            norm_lookup[norm_name] = idx
+        abbr = row_dict.get("abbreviation", "")
+        if abbr and abbr not in abbr_lookup:
+            abbr_lookup[abbr] = idx
 
-        # Empty input
-        if not norm_input:
-            out = {"input": user_input, "match type": "No Match", "match score": 0}
-            for c in _ACCOUNT_OUTPUT_COLS:
-                out[c] = ""
-            results.append(out)
-            continue
+    # For small batches, run sequentially; for large batches, use multiprocessing
+    args_list = [(raw, norm_lookup, abbr_lookup, account_names_list, account_rows) for raw in inputs]
 
-        # Normalized Exact Match
-        normalized_exact = unique_accounts[unique_accounts["normalized_account"] == norm_input]
-        if not normalized_exact.empty:
-            row = normalized_exact.iloc[0]
-            out = {
-                "input": user_input,
-                "match type": "Normalized Exact Match",
-                "match score": 100.0,
-            }
-            for display_col, actual_col in _ACCOUNT_OUTPUT_COLS.items():
-                out[display_col] = row.get(actual_col, "")
-            results.append(out)
-            continue
-
-        # Abbreviation Exact Match
-        if "abbreviation" in unique_accounts.columns:
-            abbr_match = unique_accounts[unique_accounts["abbreviation"] == norm_input]
-            if not abbr_match.empty:
-                row = abbr_match.iloc[0]
-                out = {
-                    "input": user_input,
-                    "match type": "Abbreviation Match",
-                    "match score": 100.0,
-                }
-                for display_col, actual_col in _ACCOUNT_OUTPUT_COLS.items():
-                    out[display_col] = row.get(actual_col, "")
-                results.append(out)
-                continue
-
-        # Fuzzy matching — ratio first, token_sort_ratio only if ratio misses
-        match = rfuzz_process.extractOne(
-            norm_input, account_names_list, scorer=fuzz.ratio,
-            processor=None, score_cutoff=80,
-        )
-        if not match:
-            match = rfuzz_process.extractOne(
-                norm_input, account_names_list, scorer=fuzz.token_sort_ratio,
-                processor=None, score_cutoff=80,
-            )
-
-        if match and match[1] >= 90:
-            row = unique_accounts.iloc[match[2]]
-            out = {
-                "input": user_input,
-                "match type": "High Confidence Match",
-                "match score": float(match[1]),
-            }
-            for display_col, actual_col in _ACCOUNT_OUTPUT_COLS.items():
-                out[display_col] = row.get(actual_col, "")
-        elif match and match[1] >= 80:
-            row = unique_accounts.iloc[match[2]]
-            out = {
-                "input": user_input,
-                "match type": "Possible Match",
-                "match score": float(match[1]),
-            }
-            for display_col, actual_col in _ACCOUNT_OUTPUT_COLS.items():
-                out[display_col] = row.get(actual_col, "")
-        else:
-            out = {
-                "input": user_input,
-                "match type": "No Match",
-                "match score": float(match[1]) if match else 0,
-            }
-            for c in _ACCOUNT_OUTPUT_COLS:
-                out[c] = ""
-
-        results.append(out)
+    if len(inputs) > 50:
+        from concurrent.futures import ProcessPoolExecutor
+        import os
+        workers = min(os.cpu_count() or 1, 4)
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            results = list(pool.map(_match_one_account, args_list, chunksize=max(1, len(inputs) // workers)))
+    else:
+        results = [_match_one_account(a) for a in args_list]
 
     return pd.DataFrame(results)
 

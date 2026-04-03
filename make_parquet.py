@@ -47,6 +47,7 @@ OPTIONAL_COLS_CLEAN = [
     "ispartner",
     "partner_of_record_name",
     "account_engagement_score",
+    "prime_geo",
 ]
 
 # BigQuery export rename map
@@ -55,11 +56,15 @@ BQ_RENAME = {
     "account_country": "country",
     "is_partner": "ispartner",
     "has_partner": "ispartner",
+    "geo": "prime_geo",
 }
 
 OUTPUT_NAME = "ContactDataApp2.1.parquet"
 DATA_DIR = Path(__file__).parent / "data"
 SUPPORTED_EXTS = {".csv", ".xlsx", ".xls"}
+
+# CX Accounts file for Prime Geo lookup
+CX_ACCOUNTS_PATH = Path(__file__).parent.parent.parent / "master_data" / "CX_Accounts_4_2_26.csv"
 
 
 def pick_input_file() -> Path:
@@ -131,7 +136,99 @@ def main(input_path: str = None) -> None:
         if c not in df.columns:
             print(f"  Warning: optional column not found: '{c}'")
 
-    output_path = Path(__file__).parent / OUTPUT_NAME
+    # Merge fields from CX Accounts file
+    if CX_ACCOUNTS_PATH.exists():
+        print(f"Enriching from {CX_ACCOUNTS_PATH.name} ...")
+        cx = pd.read_csv(CX_ACCOUNTS_PATH, low_memory=False)
+        cx.columns = [c.strip().lower() for c in cx.columns]
+
+        # Build customer_id lookup (one row per customer)
+        cx_lookup = (
+            cx.drop_duplicates(subset="bi customer id")
+            .rename(columns={"bi customer id": "customer_id"})
+        )
+
+        # Merge Prime Geo if not already in data
+        if "prime_geo" not in df.columns:
+            geo_lookup = cx_lookup[["customer_id", "prime geo"]].rename(columns={"prime geo": "prime_geo"})
+            df = df.merge(geo_lookup, on="customer_id", how="left")
+            df["prime_geo"] = df["prime_geo"].fillna("")
+            matched = (df["prime_geo"] != "").sum()
+            print(f"  Matched Prime Geo for {matched:,} / {len(df):,} rows")
+        else:
+            df["prime_geo"] = df["prime_geo"].fillna("")
+            print(f"  Prime Geo already in data ({(df['prime_geo'] != '').sum():,} rows populated)")
+
+        # Merge ARR if not already in data
+        arr_col = [c for c in cx_lookup.columns if "total arr" in c]
+        if arr_col and "arr" not in df.columns:
+            arr_lookup = cx_lookup[["customer_id", arr_col[0]]].rename(columns={arr_col[0]: "arr"})
+            df = df.merge(arr_lookup, on="customer_id", how="left")
+            df["arr"] = df["arr"].fillna("")
+            matched = (df["arr"] != "").sum()
+            print(f"  Matched ARR for {matched:,} / {len(df):,} rows")
+        elif "arr" in df.columns:
+            print(f"  ARR already in data")
+        else:
+            print(f"  Warning: no ARR column found in CX Accounts file")
+
+        # Merge AE Name (Overlay Territory Manager) if not already in data
+        if "overlay territory manager" in cx_lookup.columns and "ae_name" not in df.columns:
+            ae_lookup = cx_lookup[["customer_id", "overlay territory manager"]].rename(columns={"overlay territory manager": "ae_name"})
+            df = df.merge(ae_lookup, on="customer_id", how="left")
+            df["ae_name"] = df["ae_name"].fillna("")
+            matched = (df["ae_name"] != "").sum()
+            print(f"  Matched AE Name for {matched:,} / {len(df):,} rows")
+        elif "ae_name" in df.columns:
+            print(f"  AE Name already in data")
+        else:
+            print(f"  Warning: no Overlay Territory Manager column found in CX Accounts file")
+
+        # Merge Overlay Geo if not already in data
+        if "overlay geo" in cx_lookup.columns and "overlay_geo" not in df.columns:
+            geo_overlay_lookup = cx_lookup[["customer_id", "overlay geo"]].rename(columns={"overlay geo": "overlay_geo"})
+            df = df.merge(geo_overlay_lookup, on="customer_id", how="left")
+            df["overlay_geo"] = df["overlay_geo"].fillna("")
+            matched = (df["overlay_geo"] != "").sum()
+            print(f"  Matched Overlay Geo for {matched:,} / {len(df):,} rows")
+        elif "overlay_geo" in df.columns:
+            print(f"  Overlay Geo already in data")
+        else:
+            print(f"  Warning: no Overlay Geo column found in CX Accounts file")
+
+        # Merge Parent/Child flag (joins on party_number, not customer_id)
+        if "parent/child" in cx.columns and "parent_child" not in df.columns:
+            pc_lookup = (
+                cx[["party number", "parent/child"]]
+                .drop_duplicates(subset="party number")
+                .rename(columns={"party number": "party_number", "parent/child": "parent_child"})
+            )
+            pc_lookup["party_number"] = pc_lookup["party_number"].astype(str)
+            df["party_number"] = df["party_number"].astype(str)
+            df = df.merge(pc_lookup, on="party_number", how="left")
+            df["parent_child"] = df["parent_child"].fillna("")
+            matched = (df["parent_child"] != "").sum()
+            print(f"  Matched Parent/Child for {matched:,} / {len(df):,} rows")
+        elif "parent_child" in df.columns:
+            print(f"  Parent/Child already in data")
+        else:
+            print(f"  Warning: no Parent/Child column found in CX Accounts file")
+
+        # Merge Next Renewal Date (Target Beachhead Quarter) if not already in data
+        if "target beachhead quarter" in cx_lookup.columns and "next_renewal_date" not in df.columns:
+            renewal_lookup = cx_lookup[["customer_id", "target beachhead quarter"]].rename(columns={"target beachhead quarter": "next_renewal_date"})
+            df = df.merge(renewal_lookup, on="customer_id", how="left")
+            df["next_renewal_date"] = df["next_renewal_date"].fillna("")
+            matched = (df["next_renewal_date"] != "").sum()
+            print(f"  Matched Next Renewal Date for {matched:,} / {len(df):,} rows")
+        elif "next_renewal_date" in df.columns:
+            print(f"  Next Renewal Date already in data")
+        else:
+            print(f"  Warning: no Target Beachhead Quarter column found in CX Accounts file")
+    else:
+        print(f"  Warning: CX Accounts file not found at {CX_ACCOUNTS_PATH}, skipping enrichment")
+
+    output_path = Path(__file__).parent.parent.parent / "master_data" / OUTPUT_NAME
     df.to_parquet(output_path, index=False)
 
     print(f"\nWrote {len(df):,} rows x {len(df.columns)} columns -> {output_path}")

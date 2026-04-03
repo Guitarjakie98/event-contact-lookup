@@ -29,7 +29,7 @@ The UI checks API health on load and shows a banner if the server isn't reachabl
 | Tab | Input | Logic |
 |---|---|---|
 | **Contact Lookup** | Emails (one per line) | Exact match on `email_address` |
-| **Account Match** | Company names (one per line) | RapidFuzz `fuzz.ratio` ≥ 90% against normalized account names |
+| **Account Match** | Company names (one per line) | Normalized exact → abbreviation → dual fuzzy match (`fuzz.ratio` + `fuzz.token_sort_ratio`, best of both, ≥ 90% high confidence / ≥ 80% possible) |
 | **Title to Account** | Account + job title (tab or comma separated) | Account match first, then fuzzy title score across all contacts at that account |
 
 All three tabs return a sortable dataframe and a CSV download button.
@@ -99,12 +99,77 @@ The script accepts either **raw Eloqua exports** (verbose column names) or **pre
 
 ---
 
+## Runtime Data Enrichment
+
+When the Streamlit app or server loads the parquet file, `prepare_contacts()` in `matching.py` automatically enriches the data using the CX Accounts CSV located at `master_data/CX_Accounts_4_2_26.csv` (relative to the repo's parent directory). This happens at load time — the parquet file itself is not modified.
+
+### What gets enriched
+
+**1. ATS Name → Overlay Territory Owner**
+
+The CX Accounts spreadsheet's `Overlay Territory Owner` column is treated as the source of truth for the ATS rep assigned to each account. On load, the app:
+
+- Joins the CX data to the contact data on `customer_id` (mapped from `BI Customer ID` in the CX sheet)
+- Overwrites the `ats_name` field with the `Overlay Territory Owner` value for every account where the CX sheet has a value
+- Accounts not present in the CX sheet keep their original `ats_name` from the parquet
+
+This was done because the parquet's `ats_name` field uses informal display names (e.g., "Liz Kirby", "Terry Hooper") while the CX sheet has the authoritative legal/full names (e.g., "Elizabeth Kaitlyn Kirby", "Terence James Hooper"). Analysis showed 98.2% of accounts had the same person under both naming conventions, with only ~16 accounts having a genuinely different person assigned.
+
+**2. ARR Backfill**
+
+The CX Accounts spreadsheet's `Total ARR` column fills in missing ARR values:
+
+- Joins on `customer_id` the same way as above
+- Only fills rows where `arr` is blank or missing — existing ARR values are not overwritten
+
+### Columns removed
+
+The following columns were removed from the output as they are no longer needed:
+
+- `ispartner` — partner flag
+- `next_renewal_date` — renewal date
+
+---
+
+## Fuzzy Matching Details
+
+Account Match and Title to Account tabs use a multi-strategy fuzzy matching pipeline:
+
+1. **Normalized exact match** — lowercase, strip whitespace and common suffixes (Inc, Corp, Ltd, GmbH, etc.), then compare
+2. **Abbreviation match** — extract uppercase initials from the input and compare against known abbreviations
+3. **Dual fuzzy scoring** — run both `fuzz.ratio` (character-level) and `fuzz.token_sort_ratio` (word-order-independent), take the higher score. This handles inputs where words are reordered (e.g., "Healthcare GE" still matches "GE Healthcare" at 100%)
+
+Results are tiered:
+- **High Confidence Match** — score ≥ 90%
+- **Possible Match** — score 80–89% (floor raised from 70 to reduce false positives)
+- **No Match** — below 80%
+
+Both fuzzy calls use `score_cutoff` so RapidFuzz can short-circuit hopeless candidates early.
+
+### Accuracy (tested against 209 edge cases)
+
+| Input variation | Precision |
+|---|---|
+| Exact, casing, whitespace | 100% |
+| Typos (single and double char swaps) | 100% |
+| Word-order swaps | 100% |
+| Suffix add/remove | 100% |
+| `&` vs `and` substitution | 100% |
+| Dropped/added words | 75–91% |
+| Truncated or single-word inputs | 40–80% |
+| **Overall** | **93.2%** |
+
+For realistic inputs (full company names with typos, casing issues, reordered words), precision is effectively 100%. The only false positives come from degenerate inputs like single words or bare acronyms.
+
+---
+
 ## Data Files
 
 | File | Role |
 |---|---|
 | `ContactDataApp2.1.parquet` | Main contact/account database — loaded by `server.py` at startup |
 | `data/` | Drop zone for raw Eloqua exports (CSV or Excel) — not committed to git |
+| `../../master_data/CX_Accounts_4_2_26.csv` | CX Accounts export — used at load time to enrich ATS names and backfill ARR |
 
 ---
 

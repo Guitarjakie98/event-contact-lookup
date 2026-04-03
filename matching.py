@@ -385,11 +385,11 @@ def find_account_matches(contacts: pd.DataFrame, inputs: List[str]) -> pd.DataFr
     args_list = [(raw, norm_lookup, abbr_lookup, account_names_list, account_rows) for raw in inputs]
 
     if len(inputs) > 50:
-        from concurrent.futures import ProcessPoolExecutor
+        from concurrent.futures import ThreadPoolExecutor
         import os
         workers = min(os.cpu_count() or 1, 4)
-        with ProcessPoolExecutor(max_workers=workers) as pool:
-            results = list(pool.map(_match_one_account, args_list, chunksize=max(1, len(inputs) // workers)))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            results = list(pool.map(_match_one_account, args_list))
     else:
         results = [_match_one_account(a) for a in args_list]
 

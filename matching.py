@@ -4,7 +4,6 @@
 # title-to-account matching.  No Streamlit, no FastAPI — pure functions
 # that operate on DataFrames.
 
-import os
 import re
 from typing import List, Tuple
 
@@ -125,7 +124,9 @@ def prepare_contacts(df: pd.DataFrame) -> pd.DataFrame:
         )
 
     # Enrich from CX Accounts CSV (source of truth for overlay owner + ARR)
-    cx_path = os.path.join(os.path.dirname(__file__), "..", "..", "master_data", "CX_Accounts_4_2_26.csv")
+    import os
+    from config import CX_ACCOUNTS_PATH
+    cx_path = CX_ACCOUNTS_PATH
     if os.path.exists(cx_path) and "customer_id" in df.columns:
         cx = pd.read_csv(cx_path, low_memory=False)
         cx.columns = cx.columns.str.strip().str.lower()

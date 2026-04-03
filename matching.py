@@ -306,9 +306,16 @@ def find_account_matches(contacts: pd.DataFrame, inputs: List[str], _index_cache
         return pd.DataFrame()
 
     # Build or reuse the index (cached across calls within the same process)
+    # Default to parent/master accounts only for matching
     cache_key = len(contacts)
     if cache_key not in _index_cache:
         unique_accounts = contacts.drop_duplicates(subset="customer_id", keep="first")
+        if "parent_child" in unique_accounts.columns:
+            parents = unique_accounts.loc[
+                unique_accounts["parent_child"].str.strip().str.lower().isin(["parent", ""])
+            ]
+            if not parents.empty:
+                unique_accounts = parents
         _index_cache.clear()
         _index_cache[cache_key] = _build_account_index(unique_accounts)
     idx = _index_cache[cache_key]
@@ -361,15 +368,23 @@ def find_account_matches(contacts: pd.DataFrame, inputs: List[str], _index_cache
     short_jobs = [(pos, ui, ni) for pos, ui, ni in fuzzy_jobs if len(ni) < 5]
     tfidf_jobs = [(pos, ui, ni) for pos, ui, ni in fuzzy_jobs if len(ni) >= 5]
 
-    # Phase 2a: brute-force for short inputs (e.g. "CVS", "3M", "SAP")
+    # Phase 2a: for short inputs (e.g. "CVS", "3M", "SAP"), find accounts
+    # whose name starts with the input or contains it as a word, then pick
+    # the shortest (most specific) match
     for pos, user_input, norm_input in short_jobs:
-        match = rfuzz_process.extractOne(
-            norm_input, account_names_list, scorer=fuzz.ratio,
-            processor=None, score_cutoff=80,
-        )
-        if not match:
+        shortlist_indices = [
+            j for j, name in enumerate(account_names_list)
+            if norm_input in name.split() or name.startswith(norm_input + " ")
+            or name == norm_input
+        ]
+        if shortlist_indices:
+            # Pick the shortest name (closest to the input)
+            best_idx = min(shortlist_indices, key=lambda j: len(account_names_list[j]))
+            match = (account_names_list[best_idx], 95.0, best_idx)
+        else:
+            # No word/prefix matches, try brute force
             match = rfuzz_process.extractOne(
-                norm_input, account_names_list, scorer=fuzz.token_sort_ratio,
+                norm_input, account_names_list, scorer=fuzz.ratio,
                 processor=None, score_cutoff=80,
             )
 

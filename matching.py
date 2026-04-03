@@ -352,20 +352,16 @@ def find_account_matches(contacts: pd.DataFrame, inputs: List[str]) -> pd.DataFr
                 results.append(out)
                 continue
 
-        # Fuzzy matching — try both ratio and token_sort_ratio, keep the best
-        match_ratio = rfuzz_process.extractOne(
+        # Fuzzy matching — ratio first, token_sort_ratio only if ratio misses
+        match = rfuzz_process.extractOne(
             norm_input, account_names_list, scorer=fuzz.ratio,
             processor=None, score_cutoff=80,
         )
-        match_token = rfuzz_process.extractOne(
-            norm_input, account_names_list, scorer=fuzz.token_sort_ratio,
-            processor=None, score_cutoff=80,
-        )
-        # Pick whichever scorer gave the higher score
-        if match_ratio and match_token:
-            match = match_ratio if match_ratio[1] >= match_token[1] else match_token
-        else:
-            match = match_ratio or match_token
+        if not match:
+            match = rfuzz_process.extractOne(
+                norm_input, account_names_list, scorer=fuzz.token_sort_ratio,
+                processor=None, score_cutoff=80,
+            )
 
         if match and match[1] >= 90:
             row = unique_accounts.iloc[match[2]]
@@ -455,20 +451,17 @@ def find_title_to_account_matches(
             if not abbr_match.empty:
                 matched_account_id = abbr_match.iloc[0]["customer_id"]
 
-        # Fuzzy matching (>=90%) — try both ratio and token_sort_ratio, keep the best
+        # Fuzzy matching (>=90%) — ratio first, token_sort_ratio only if ratio misses
         if matched_account_id is None:
-            match_ratio = rfuzz_process.extractOne(
+            match = rfuzz_process.extractOne(
                 norm_account, account_names_list, scorer=fuzz.ratio,
                 processor=None, score_cutoff=90,
             )
-            match_token = rfuzz_process.extractOne(
-                norm_account, account_names_list, scorer=fuzz.token_sort_ratio,
-                processor=None, score_cutoff=90,
-            )
-            if match_ratio and match_token:
-                match = match_ratio if match_ratio[1] >= match_token[1] else match_token
-            else:
-                match = match_ratio or match_token
+            if not match:
+                match = rfuzz_process.extractOne(
+                    norm_account, account_names_list, scorer=fuzz.token_sort_ratio,
+                    processor=None, score_cutoff=90,
+                )
             if match:
                 matched_account_id = unique_accounts.iloc[match[2]]["customer_id"]
 

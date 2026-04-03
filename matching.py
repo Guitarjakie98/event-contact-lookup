@@ -320,72 +320,80 @@ def find_account_matches(contacts: pd.DataFrame, inputs: List[str], _index_cache
     vectorizer = idx["vectorizer"]
     tfidf_matrix = idx["tfidf_matrix"]
 
+    import numpy as np
+
     TOP_K = 50  # number of TF-IDF candidates to fuzzy match against
 
-    results = []
-    for raw in inputs:
+    # Phase 1: separate exact matches from fuzzy candidates
+    results = [None] * len(inputs)
+    fuzzy_jobs = []  # (position, user_input, norm_input)
+
+    for i, raw in enumerate(inputs):
         user_input = raw.strip()
         norm_input = normalize_name(user_input)
 
-        # Empty input
         if not norm_input:
             out = {"input": user_input, "match type": "No Match", "match score": 0}
             for c in _ACCOUNT_OUTPUT_COLS:
                 out[c] = ""
-            results.append(out)
+            results[i] = out
             continue
 
-        # Normalized Exact Match
         if norm_input in norm_lookup:
             row = account_rows[norm_lookup[norm_input]]
             out = {"input": user_input, "match type": "Normalized Exact Match", "match score": 100.0}
             for display_col, actual_col in _ACCOUNT_OUTPUT_COLS.items():
                 out[display_col] = row.get(actual_col, "")
-            results.append(out)
+            results[i] = out
             continue
 
-        # Abbreviation Exact Match
         if norm_input in abbr_lookup:
             row = account_rows[abbr_lookup[norm_input]]
             out = {"input": user_input, "match type": "Abbreviation Match", "match score": 100.0}
             for display_col, actual_col in _ACCOUNT_OUTPUT_COLS.items():
                 out[display_col] = row.get(actual_col, "")
-            results.append(out)
+            results[i] = out
             continue
 
-        # TF-IDF candidate retrieval + fuzzy matching on top candidates only
-        query_vec = vectorizer.transform([norm_input])
-        scores = (tfidf_matrix @ query_vec.T).toarray().ravel()
-        top_indices = scores.argsort()[-TOP_K:][::-1]
-        candidates = [account_names_list[i] for i in top_indices]
+        fuzzy_jobs.append((i, user_input, norm_input))
 
-        # Fuzzy match against only the top candidates
-        match = rfuzz_process.extractOne(
-            norm_input, candidates, scorer=fuzz.ratio,
-            processor=None, score_cutoff=80,
-        )
-        if not match:
+    # Phase 2: batch TF-IDF retrieval for all fuzzy candidates at once
+    if fuzzy_jobs:
+        norm_inputs = [nj[2] for nj in fuzzy_jobs]
+        query_matrix = vectorizer.transform(norm_inputs)
+        # One big matrix multiply: (N_queries x features) @ (features x N_accounts)
+        similarity = (query_matrix @ tfidf_matrix.T).toarray()
+
+        for job_idx, (pos, user_input, norm_input) in enumerate(fuzzy_jobs):
+            row_scores = similarity[job_idx]
+            top_indices = np.argpartition(row_scores, -TOP_K)[-TOP_K:]
+            candidates = [account_names_list[i] for i in top_indices]
+
             match = rfuzz_process.extractOne(
-                norm_input, candidates, scorer=fuzz.token_sort_ratio,
+                norm_input, candidates, scorer=fuzz.ratio,
                 processor=None, score_cutoff=80,
             )
+            if not match:
+                match = rfuzz_process.extractOne(
+                    norm_input, candidates, scorer=fuzz.token_sort_ratio,
+                    processor=None, score_cutoff=80,
+                )
 
-        if match:
-            # Map back to the original index
-            original_idx = top_indices[candidates.index(match[0])]
-            row = account_rows[original_idx]
-            if match[1] >= 90:
-                out = {"input": user_input, "match type": "High Confidence Match", "match score": float(match[1])}
+            if match:
+                original_idx = top_indices[candidates.index(match[0])]
+                row = account_rows[original_idx]
+                if match[1] >= 90:
+                    out = {"input": user_input, "match type": "High Confidence Match", "match score": float(match[1])}
+                else:
+                    out = {"input": user_input, "match type": "Possible Match", "match score": float(match[1])}
+                for display_col, actual_col in _ACCOUNT_OUTPUT_COLS.items():
+                    out[display_col] = row.get(actual_col, "")
             else:
-                out = {"input": user_input, "match type": "Possible Match", "match score": float(match[1])}
-            for display_col, actual_col in _ACCOUNT_OUTPUT_COLS.items():
-                out[display_col] = row.get(actual_col, "")
-        else:
-            out = {"input": user_input, "match type": "No Match", "match score": 0}
-            for c in _ACCOUNT_OUTPUT_COLS:
-                out[c] = ""
+                out = {"input": user_input, "match type": "No Match", "match score": 0}
+                for c in _ACCOUNT_OUTPUT_COLS:
+                    out[c] = ""
 
-        results.append(out)
+            results[pos] = out
 
     return pd.DataFrame(results)
 

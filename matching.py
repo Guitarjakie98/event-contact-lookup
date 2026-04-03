@@ -123,40 +123,6 @@ def prepare_contacts(df: pd.DataFrame) -> pd.DataFrame:
             lambda x: x.split("@")[-1].lower() if isinstance(x, str) and "@" in x else ""
         )
 
-    # Enrich from CX Accounts CSV (source of truth for overlay owner + ARR)
-    import os
-    from config import CX_ACCOUNTS_PATH
-    cx_path = CX_ACCOUNTS_PATH
-    if os.path.exists(cx_path) and "customer_id" in df.columns:
-        cx = pd.read_csv(cx_path, low_memory=False)
-        cx.columns = cx.columns.str.strip().str.lower()
-        df["customer_id"] = df["customer_id"].astype(str)
-
-        if "bi customer id" in cx.columns:
-            cx["customer_id"] = cx["bi customer id"].astype(str).str.strip()
-            cx_lookup = cx.drop_duplicates(subset="customer_id")
-
-            # Fill missing ARR from total arr
-            if "total arr" in cx_lookup.columns:
-                arr_lookup = cx_lookup[["customer_id", "total arr"]].rename(columns={"total arr": "cx_arr"})
-                df = df.merge(arr_lookup, on="customer_id", how="left")
-                missing_arr = (df["arr"] == "") | df["arr"].isna()
-                df.loc[missing_arr, "arr"] = df.loc[missing_arr, "cx_arr"]
-                df = df.drop(columns=["cx_arr"])
-                df["arr"] = df["arr"].fillna("")
-
-            # Overwrite ats_name with overlay territory owner (source of truth)
-            if "overlay territory owner" in cx_lookup.columns:
-                owner_lookup = cx_lookup[["customer_id", "overlay territory owner"]].rename(
-                    columns={"overlay territory owner": "cx_ats_name"}
-                )
-                owner_lookup["cx_ats_name"] = owner_lookup["cx_ats_name"].fillna("").str.strip()
-                df = df.merge(owner_lookup, on="customer_id", how="left")
-                # Replace ats_name where the CX sheet has a value
-                has_owner = (df["cx_ats_name"] != "") & df["cx_ats_name"].notna()
-                df.loc[has_owner, "ats_name"] = df.loc[has_owner, "cx_ats_name"]
-                df = df.drop(columns=["cx_ats_name"])
-
     return df
 
 

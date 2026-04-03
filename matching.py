@@ -306,16 +306,14 @@ def find_account_matches(contacts: pd.DataFrame, inputs: List[str], _index_cache
         return pd.DataFrame()
 
     # Build or reuse the index (cached across calls within the same process)
-    # Default to parent/master accounts only for matching
+    # Prefer parent/master rows (party_number == customer_id) per account
     cache_key = len(contacts)
     if cache_key not in _index_cache:
-        unique_accounts = contacts.drop_duplicates(subset="customer_id", keep="first")
-        if "parent_child" in unique_accounts.columns:
-            parents = unique_accounts.loc[
-                unique_accounts["parent_child"].str.strip().str.lower().isin(["parent", ""])
-            ]
-            if not parents.empty:
-                unique_accounts = parents
+        df = contacts.copy()
+        df["_is_parent"] = df["party_number"].astype(str) == df["customer_id"].astype(str)
+        # Sort so parent rows come first, then deduplicate
+        df = df.sort_values("_is_parent", ascending=False)
+        unique_accounts = df.drop_duplicates(subset="customer_id", keep="first").drop(columns=["_is_parent"])
         _index_cache.clear()
         _index_cache[cache_key] = _build_account_index(unique_accounts)
     idx = _index_cache[cache_key]

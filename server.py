@@ -22,9 +22,8 @@ app = FastAPI(title="Event Contact Lookup API")
 # Load Data Once
 # ============================================================
 
-from pathlib import Path
-DATA_PATH = str(Path(__file__).parent.parent.parent / "master_data" / "ContactDataApp2.1.parquet")
-contacts = prepare_contacts(pd.read_parquet(DATA_PATH))
+from config import PARQUET_PATH
+contacts = prepare_contacts(pd.read_parquet(PARQUET_PATH))
 
 # ============================================================
 # Schemas

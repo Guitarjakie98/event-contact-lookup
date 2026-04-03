@@ -2,6 +2,7 @@ import os
 import pandas as pd
 import streamlit as st
 
+from config import PARQUET_PATH
 from matching import prepare_contacts, find_contact_matches, find_account_matches, find_title_to_account_matches
 
 # MUST be the first Streamlit command
@@ -25,16 +26,14 @@ def resource_path(filename: str) -> str:
 
 @st.cache_data(show_spinner=True)
 def load_contacts() -> pd.DataFrame:
-    file_path = os.path.join(os.path.dirname(__file__), "..", "..", "master_data", "ContactDataApp2.1.parquet")
-
-    if not os.path.exists(file_path):
+    if not os.path.exists(PARQUET_PATH):
         st.error(
-            f"Could not find ContactDataApp2.1.parquet at:\n{file_path}\n\n"
-            "Make sure the file is in the same folder as app.py."
+            f"Could not find ContactDataApp2.1.parquet at:\n{PARQUET_PATH}\n\n"
+            "Set the DATA_DIR environment variable or place the file in master_data/."
         )
         return pd.DataFrame()
 
-    return prepare_contacts(pd.read_parquet(file_path))
+    return prepare_contacts(pd.read_parquet(PARQUET_PATH))
 
 
 contacts = load_contacts()

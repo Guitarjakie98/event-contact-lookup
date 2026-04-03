@@ -213,15 +213,24 @@ with tab2:
     run_accounts = st.button("Run Account Lookup", type="primary")
 
     if run_accounts:
-        items = [x.strip() for x in accounts_raw.splitlines()]
-        with st.spinner("Matching accounts..."):
+        import time as _time
+        items = [x.strip() for x in accounts_raw.splitlines() if x.strip()]
+        t0 = _time.perf_counter()
+        with st.spinner(f"Matching {len(items):,} accounts..."):
             df = find_account_matches(contacts, items)
+        elapsed = _time.perf_counter() - t0
 
         if df.empty:
             st.warning("No account matches found.")
         else:
-            st.success(f"Generated **{len(df):,}** account rows.")
-            st.dataframe(df, use_container_width=True)
+            st.success(f"Matched **{len(df):,}** accounts in **{elapsed:.1f}s**.")
+
+            # Show preview (first 100 rows) to keep the UI responsive
+            if len(df) > 100:
+                st.caption(f"Showing first 100 of {len(df):,} rows. Download CSV for full results.")
+                st.dataframe(df.head(100), use_container_width=True)
+            else:
+                st.dataframe(df, use_container_width=True)
 
             csv = df.to_csv(index=False).encode("utf-8")
             st.download_button(

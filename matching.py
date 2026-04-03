@@ -357,14 +357,43 @@ def find_account_matches(contacts: pd.DataFrame, inputs: List[str], _index_cache
 
         fuzzy_jobs.append((i, user_input, norm_input))
 
-    # Phase 2: batch TF-IDF retrieval for all fuzzy candidates at once
-    if fuzzy_jobs:
-        norm_inputs = [nj[2] for nj in fuzzy_jobs]
+    # Split fuzzy jobs: short inputs use brute-force, long inputs use TF-IDF
+    short_jobs = [(pos, ui, ni) for pos, ui, ni in fuzzy_jobs if len(ni) < 5]
+    tfidf_jobs = [(pos, ui, ni) for pos, ui, ni in fuzzy_jobs if len(ni) >= 5]
+
+    # Phase 2a: brute-force for short inputs (e.g. "CVS", "3M", "SAP")
+    for pos, user_input, norm_input in short_jobs:
+        match = rfuzz_process.extractOne(
+            norm_input, account_names_list, scorer=fuzz.ratio,
+            processor=None, score_cutoff=80,
+        )
+        if not match:
+            match = rfuzz_process.extractOne(
+                norm_input, account_names_list, scorer=fuzz.token_sort_ratio,
+                processor=None, score_cutoff=80,
+            )
+
+        if match:
+            row = account_rows[match[2]]
+            if match[1] >= 90:
+                out = {"input": user_input, "match type": "High Confidence Match", "match score": float(match[1])}
+            else:
+                out = {"input": user_input, "match type": "Possible Match", "match score": float(match[1])}
+            for display_col, actual_col in _ACCOUNT_OUTPUT_COLS.items():
+                out[display_col] = row.get(actual_col, "")
+        else:
+            out = {"input": user_input, "match type": "No Match", "match score": 0}
+            for c in _ACCOUNT_OUTPUT_COLS:
+                out[c] = ""
+        results[pos] = out
+
+    # Phase 2b: batch TF-IDF retrieval for longer inputs
+    if tfidf_jobs:
+        norm_inputs = [nj[2] for nj in tfidf_jobs]
         query_matrix = vectorizer.transform(norm_inputs)
-        # One big matrix multiply: (N_queries x features) @ (features x N_accounts)
         similarity = (query_matrix @ tfidf_matrix.T).toarray()
 
-        for job_idx, (pos, user_input, norm_input) in enumerate(fuzzy_jobs):
+        for job_idx, (pos, user_input, norm_input) in enumerate(tfidf_jobs):
             row_scores = similarity[job_idx]
             top_indices = np.argpartition(row_scores, -TOP_K)[-TOP_K:]
             candidates = [account_names_list[i] for i in top_indices]

@@ -196,6 +196,24 @@ def main(input_path: str = None) -> None:
         else:
             print(f"  Warning: no Overlay Geo column found in CX Accounts file")
 
+        # Merge Parent/Child flag (joins on party_number, not customer_id)
+        if "parent/child" in cx.columns and "parent_child" not in df.columns:
+            pc_lookup = (
+                cx[["party number", "parent/child"]]
+                .drop_duplicates(subset="party number")
+                .rename(columns={"party number": "party_number", "parent/child": "parent_child"})
+            )
+            pc_lookup["party_number"] = pc_lookup["party_number"].astype(str)
+            df["party_number"] = df["party_number"].astype(str)
+            df = df.merge(pc_lookup, on="party_number", how="left")
+            df["parent_child"] = df["parent_child"].fillna("")
+            matched = (df["parent_child"] != "").sum()
+            print(f"  Matched Parent/Child for {matched:,} / {len(df):,} rows")
+        elif "parent_child" in df.columns:
+            print(f"  Parent/Child already in data")
+        else:
+            print(f"  Warning: no Parent/Child column found in CX Accounts file")
+
         # Merge Next Renewal Date (Target Beachhead Quarter) if not already in data
         if "target beachhead quarter" in cx_lookup.columns and "next_renewal_date" not in df.columns:
             renewal_lookup = cx_lookup[["customer_id", "target beachhead quarter"]].rename(columns={"target beachhead quarter": "next_renewal_date"})

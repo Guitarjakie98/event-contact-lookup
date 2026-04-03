@@ -4,6 +4,7 @@
 # title-to-account matching.  No Streamlit, no FastAPI — pure functions
 # that operate on DataFrames.
 
+import os
 import re
 from typing import List, Tuple
 
@@ -123,6 +124,38 @@ def prepare_contacts(df: pd.DataFrame) -> pd.DataFrame:
             lambda x: x.split("@")[-1].lower() if isinstance(x, str) and "@" in x else ""
         )
 
+    # Enrich from CX Accounts CSV (source of truth for overlay owner + ARR)
+    cx_path = os.path.join(os.path.dirname(__file__), "..", "..", "master_data", "CX_Accounts_4_2_26.csv")
+    if os.path.exists(cx_path) and "customer_id" in df.columns:
+        cx = pd.read_csv(cx_path, low_memory=False)
+        cx.columns = cx.columns.str.strip().str.lower()
+        df["customer_id"] = df["customer_id"].astype(str)
+
+        if "bi customer id" in cx.columns:
+            cx["customer_id"] = cx["bi customer id"].astype(str).str.strip()
+            cx_lookup = cx.drop_duplicates(subset="customer_id")
+
+            # Fill missing ARR from total arr
+            if "total arr" in cx_lookup.columns:
+                arr_lookup = cx_lookup[["customer_id", "total arr"]].rename(columns={"total arr": "cx_arr"})
+                df = df.merge(arr_lookup, on="customer_id", how="left")
+                missing_arr = (df["arr"] == "") | df["arr"].isna()
+                df.loc[missing_arr, "arr"] = df.loc[missing_arr, "cx_arr"]
+                df = df.drop(columns=["cx_arr"])
+                df["arr"] = df["arr"].fillna("")
+
+            # Overwrite ats_name with overlay territory owner (source of truth)
+            if "overlay territory owner" in cx_lookup.columns:
+                owner_lookup = cx_lookup[["customer_id", "overlay territory owner"]].rename(
+                    columns={"overlay territory owner": "cx_ats_name"}
+                )
+                owner_lookup["cx_ats_name"] = owner_lookup["cx_ats_name"].fillna("").str.strip()
+                df = df.merge(owner_lookup, on="customer_id", how="left")
+                # Replace ats_name where the CX sheet has a value
+                has_owner = (df["cx_ats_name"] != "") & df["cx_ats_name"].notna()
+                df.loc[has_owner, "ats_name"] = df.loc[has_owner, "cx_ats_name"]
+                df = df.drop(columns=["cx_ats_name"])
+
     return df
 
 
@@ -165,8 +198,6 @@ _CONTACT_COLUMN_ORDER = [
     "ae_name",
     "ats_name",
     "ats_email",
-    "ispartner",
-    "next_renewal_date",
 ]
 
 _ACCOUNT_OUTPUT_COLS = {
@@ -181,8 +212,6 @@ _ACCOUNT_OUTPUT_COLS = {
     "ae_name": "ae_name",
     "ats_name": "ats_name",
     "ats_email": "ats_email",
-    "ispartner": "ispartner",
-    "next_renewal_date": "next_renewal_date",
 }
 
 
@@ -322,8 +351,20 @@ def find_account_matches(contacts: pd.DataFrame, inputs: List[str]) -> pd.DataFr
                 results.append(out)
                 continue
 
-        # Fuzzy matching — use rfuzz_process.extractOne for speed
-        match = rfuzz_process.extractOne(norm_input, account_names_list, scorer=fuzz.ratio)
+        # Fuzzy matching — try both ratio and token_sort_ratio, keep the best
+        match_ratio = rfuzz_process.extractOne(
+            norm_input, account_names_list, scorer=fuzz.ratio,
+            processor=None, score_cutoff=80,
+        )
+        match_token = rfuzz_process.extractOne(
+            norm_input, account_names_list, scorer=fuzz.token_sort_ratio,
+            processor=None, score_cutoff=80,
+        )
+        # Pick whichever scorer gave the higher score
+        if match_ratio and match_token:
+            match = match_ratio if match_ratio[1] >= match_token[1] else match_token
+        else:
+            match = match_ratio or match_token
 
         if match and match[1] >= 90:
             row = unique_accounts.iloc[match[2]]
@@ -334,7 +375,7 @@ def find_account_matches(contacts: pd.DataFrame, inputs: List[str]) -> pd.DataFr
             }
             for display_col, actual_col in _ACCOUNT_OUTPUT_COLS.items():
                 out[display_col] = row.get(actual_col, "")
-        elif match and match[1] >= 70:
+        elif match and match[1] >= 80:
             row = unique_accounts.iloc[match[2]]
             out = {
                 "input": user_input,
@@ -413,10 +454,21 @@ def find_title_to_account_matches(
             if not abbr_match.empty:
                 matched_account_id = abbr_match.iloc[0]["customer_id"]
 
-        # Fuzzy matching (>=90%)
+        # Fuzzy matching (>=90%) — try both ratio and token_sort_ratio, keep the best
         if matched_account_id is None:
-            match = rfuzz_process.extractOne(norm_account, account_names_list, scorer=fuzz.ratio)
-            if match and match[1] >= 90:
+            match_ratio = rfuzz_process.extractOne(
+                norm_account, account_names_list, scorer=fuzz.ratio,
+                processor=None, score_cutoff=90,
+            )
+            match_token = rfuzz_process.extractOne(
+                norm_account, account_names_list, scorer=fuzz.token_sort_ratio,
+                processor=None, score_cutoff=90,
+            )
+            if match_ratio and match_token:
+                match = match_ratio if match_ratio[1] >= match_token[1] else match_token
+            else:
+                match = match_ratio or match_token
+            if match:
                 matched_account_id = unique_accounts.iloc[match[2]]["customer_id"]
 
         # If no account match >=90%, return no match

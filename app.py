@@ -14,6 +14,28 @@ st.set_page_config(
 
 CITRIX_BLUE = "#009FD9"
 
+# ----------------------------------------------------------
+# Password Gate
+# ----------------------------------------------------------
+def check_password():
+    """Prompt for a password before showing the app."""
+    if "authenticated" not in st.session_state:
+        st.session_state.authenticated = False
+
+    if st.session_state.authenticated:
+        return True
+
+    pw = st.text_input("Enter password to continue:", type="password")
+    if pw == "events":
+        st.session_state.authenticated = True
+        st.rerun()
+    elif pw:
+        st.error("Incorrect password.")
+    return False
+
+if not check_password():
+    st.stop()
+
 
 # ----------------------------------------------------------
 # Resource + Data Loader

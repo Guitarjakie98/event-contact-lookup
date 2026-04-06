@@ -172,15 +172,16 @@ def main(input_path: str = None) -> None:
         else:
             print(f"  Warning: no ARR column found in CX Accounts file")
 
-        # Merge AE Name (Prime Territory Owner) if not already in data
-        if "prime territory owner" in cx_lookup.columns and "ae_name" not in df.columns:
-            ae_lookup = cx_lookup[["customer_id", "prime territory owner"]].rename(columns={"prime territory owner": "ae_name"})
+        # Merge AE Name (Prime Territory Owner) — always overwrite from CX Accounts
+        if "prime territory owner" in cx_lookup.columns:
+            ae_lookup = cx_lookup[["customer_id", "prime territory owner"]].rename(columns={"prime territory owner": "ae_name_cx"})
+            if "ae_name" in df.columns:
+                df = df.drop(columns=["ae_name"])
             df = df.merge(ae_lookup, on="customer_id", how="left")
+            df = df.rename(columns={"ae_name_cx": "ae_name"})
             df["ae_name"] = df["ae_name"].fillna("")
             matched = (df["ae_name"] != "").sum()
             print(f"  Matched AE Name for {matched:,} / {len(df):,} rows")
-        elif "ae_name" in df.columns:
-            print(f"  AE Name already in data")
         else:
             print(f"  Warning: no Prime Territory Owner column found in CX Accounts file")
 
@@ -197,7 +198,7 @@ def main(input_path: str = None) -> None:
             print(f"  Warning: no Overlay Geo column found in CX Accounts file")
 
         # Merge Parent/Child flag (joins on party_number, not customer_id)
-        if "parent/child" in cx.columns and "parent_child" not in df.columns:
+        if "parent/child" in cx.columns and "parent_child" not in df.columns and "party_number" in df.columns:
             pc_lookup = (
                 cx[["party number", "parent/child"]]
                 .drop_duplicates(subset="party number")

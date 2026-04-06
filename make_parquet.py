@@ -172,9 +172,9 @@ def main(input_path: str = None) -> None:
         else:
             print(f"  Warning: no ARR column found in CX Accounts file")
 
-        # Merge AE Name (Overlay Territory Manager) if not already in data
-        if "overlay territory manager" in cx_lookup.columns and "ae_name" not in df.columns:
-            ae_lookup = cx_lookup[["customer_id", "overlay territory manager"]].rename(columns={"overlay territory manager": "ae_name"})
+        # Merge AE Name (Prime Territory Owner) if not already in data
+        if "prime territory owner" in cx_lookup.columns and "ae_name" not in df.columns:
+            ae_lookup = cx_lookup[["customer_id", "prime territory owner"]].rename(columns={"prime territory owner": "ae_name"})
             df = df.merge(ae_lookup, on="customer_id", how="left")
             df["ae_name"] = df["ae_name"].fillna("")
             matched = (df["ae_name"] != "").sum()
@@ -182,7 +182,7 @@ def main(input_path: str = None) -> None:
         elif "ae_name" in df.columns:
             print(f"  AE Name already in data")
         else:
-            print(f"  Warning: no Overlay Territory Manager column found in CX Accounts file")
+            print(f"  Warning: no Prime Territory Owner column found in CX Accounts file")
 
         # Merge Overlay Geo if not already in data
         if "overlay geo" in cx_lookup.columns and "overlay_geo" not in df.columns:

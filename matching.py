@@ -105,6 +105,7 @@ def prepare_contacts(df: pd.DataFrame) -> pd.DataFrame:
         "oracle account line of business": "line_of_business",
         "ae person name": "ae_name",
         "ae level14 territory name": "level15_territory_name",
+        "level14_territory_name": "level15_territory_name",
         "ats team person name": "ats_name",
         "arr total arr": "arr",
         "arr next renewal date": "next_renewal_date",
@@ -310,10 +311,13 @@ def find_account_matches(contacts: pd.DataFrame, inputs: List[str], _index_cache
     cache_key = len(contacts)
     if cache_key not in _index_cache:
         df = contacts.copy()
-        df["_is_parent"] = df["party_number"].astype(str) == df["customer_id"].astype(str)
-        # Sort so parent rows come first, then deduplicate
-        df = df.sort_values("_is_parent", ascending=False)
-        unique_accounts = df.drop_duplicates(subset="customer_id", keep="first").drop(columns=["_is_parent"])
+        if "party_number" in df.columns:
+            df["_is_parent"] = df["party_number"].astype(str) == df["customer_id"].astype(str)
+            # Sort so parent rows come first, then deduplicate
+            df = df.sort_values("_is_parent", ascending=False)
+            unique_accounts = df.drop_duplicates(subset="customer_id", keep="first").drop(columns=["_is_parent"])
+        else:
+            unique_accounts = df.drop_duplicates(subset="customer_id", keep="first")
         _index_cache.clear()
         _index_cache[cache_key] = _build_account_index(unique_accounts)
     idx = _index_cache[cache_key]
@@ -411,18 +415,32 @@ def find_account_matches(contacts: pd.DataFrame, inputs: List[str], _index_cache
             top_indices = np.argpartition(row_scores, -TOP_K)[-TOP_K:]
             candidates = [account_names_list[i] for i in top_indices]
 
-            match = rfuzz_process.extractOne(
-                norm_input, candidates, scorer=fuzz.ratio,
-                processor=None, score_cutoff=80,
-            )
-            if not match:
-                match = rfuzz_process.extractOne(
-                    norm_input, candidates, scorer=fuzz.token_sort_ratio,
-                    processor=None, score_cutoff=80,
+            # Score every candidate with all scorers, pick the best overall.
+            # This prevents a weak ratio match (e.g. "cisco"→"disco" 80%)
+            # from shadowing a strong token_set match ("cisco"→"cisco systems" 100%).
+            # When scores tie, prefer Enterprise accounts.
+            scored = []
+            for j, cand in enumerate(candidates):
+                score = max(
+                    fuzz.ratio(norm_input, cand),
+                    fuzz.token_sort_ratio(norm_input, cand),
+                    fuzz.token_set_ratio(norm_input, cand),
                 )
+                if score >= 80:
+                    row = account_rows[top_indices[j]]
+                    is_enterprise = 1 if row.get("account_segmentation", "") == "CITRIX_ENTERPRISE" else 0
+                    scored.append((score, is_enterprise, cand, j))
+
+            if scored:
+                # Best score first, then enterprise tiebreaker
+                scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
+                best = scored[0]
+                match = (best[2], best[0], best[3])
+            else:
+                match = None
 
             if match:
-                original_idx = top_indices[candidates.index(match[0])]
+                original_idx = top_indices[match[2]]
                 row = account_rows[original_idx]
                 if match[1] >= 90:
                     out = {"input": user_input, "match type": "High Confidence Match", "match score": float(match[1])}

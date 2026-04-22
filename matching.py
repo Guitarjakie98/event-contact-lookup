@@ -216,11 +216,16 @@ def find_contact_matches(contacts: pd.DataFrame, emails: List[str]) -> pd.DataFr
         exact = contacts[contacts["email_address"].str.lower() == email]
         if not exact.empty:
             row = exact.iloc[0]
-            out = {"input": user_input, "match type": "Exact Match", "match score": 100}
-            for c in output_cols:
-                out[c] = row.get(c, "")
-            results.append(out)
-            continue
+            # Only treat as exact match if there's a real account behind it.
+            # If customer_id is blank (upstream join gap), fall through to
+            # domain match so the user gets the populated account at that domain
+            # instead of an Exact Match row with empty account fields.
+            if str(row.get("customer_id", "")).strip():
+                out = {"input": user_input, "match type": "Exact Match", "match score": 100}
+                for c in output_cols:
+                    out[c] = row.get(c, "")
+                results.append(out)
+                continue
 
         # Domain match — skip personal/generic email providers
         domain = email.split("@")[-1]

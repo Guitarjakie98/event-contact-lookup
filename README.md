@@ -45,6 +45,36 @@ Contacts with personal/generic email domains (Gmail, Yahoo, Hotmail, Outlook, iC
 
 ---
 
+## Deployed App & Live Updates
+
+The app runs on a Vultr instance at `66.42.120.99:8501`. **Operational details (server specs, SSH, systemd, swap, runbook) are in [OPERATIONS.md](OPERATIONS.md).**
+
+### Letting Claude Code update the server for you
+
+Claude Code has Vultr API access via an API key stored locally at:
+
+```
+~/OneDrive/Desktop/Data Python Projects/.vultr/api_key.txt
+```
+
+That key is the only credential needed. With it, Claude can:
+
+- SSH into the live server (key auth is set up; no passwords needed)
+- Push a refreshed parquet using `deploy/refresh-data.sh`
+- Pull new code, restart the service, view logs
+- Rebuild the box from scratch using `deploy/setup-server.sh` after a Vultr reinstall
+
+**To update the live server:** just ask Claude. Examples:
+
+- "Refresh the data on the event app server" → runs `deploy/refresh-data.sh` after the local parquet is current
+- "Pull the latest main on the event app and restart" → SSH + `git pull` + `systemctl restart`
+- "Show me the recent logs for the event app service" → SSH + `journalctl -u event-contact-lookup`
+- "Rebuild the event app from a fresh Vultr reinstall" → walks you through the dashboard click, then `deploy/setup-server.sh`
+
+The API key file is `.gitignored`-equivalent (it lives outside any repo). **Rotate the key in the Vultr dashboard whenever you want to revoke access.**
+
+---
+
 ## Updating the Data
 
 When you have a new Eloqua/Oracle export:

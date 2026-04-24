@@ -106,6 +106,8 @@ def prepare_contacts(df: pd.DataFrame) -> pd.DataFrame:
         "ae person name": "ae_name",
         "ae level14 territory name": "level15_territory_name",
         "level14_territory_name": "level15_territory_name",
+        "sales_geo": "prime_geo",
+        "ats_geo": "overlay_geo",
         "ats team person name": "ats_name",
         "arr total arr": "arr",
         "arr next renewal date": "next_renewal_date",
